@@ -5,18 +5,21 @@ Supports students submitting weekly reports, and Admin, Program Managers, Coache
 
 ## Prerequisites
 - Node.js (v18+)
-- SQLite (included)
+- A Supabase Postgres database (see `SUPABASE_SETUP.md`)
 
 ## Setup
 1. Copy the example environment file:
    `cp .env.example .env`
-2. Update the `.env` file with a secure `JWT_SECRET`.
+2. Fill `.env` with your Supabase `DATABASE_URL` + `DIRECT_URL` and a secure `JWT_SECRET`.
 3. Install dependencies:
    `npm install`
-4. Setup the database and run migrations:
-   `npx prisma db push`
-   *(Optional)* Seed default data:
-   `NODE_ENV=development npx prisma db seed`
+4. Run migrations against your database:
+   `npm run db:deploy`
+   *(Optional)* Seed a local admin:
+   `DEV_ADMIN_EMAILS=you@example.com DEV_ADMIN_PASSWORD=strong-pass NODE_ENV=development npm run db:seed`
+
+## Deploy (Vercel + Supabase)
+See **`SUPABASE_SETUP.md`** for the full step-by-step (connection strings, env vars, Firebase social login).
 
 ## Running Locally
 Start both the Vite frontend and Express backend:
