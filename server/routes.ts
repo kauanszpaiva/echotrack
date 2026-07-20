@@ -1,13 +1,12 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { authMiddleware, AuthRequest, roleMiddleware } from './auth.js';
 import { JWT_SECRET } from './config.js';
+import prisma from './prisma.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // Recursively strips password and inviteToken from any object/array before sending to client
 function omitSensitive(obj: any): any {
