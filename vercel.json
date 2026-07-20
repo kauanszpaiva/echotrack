@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "prisma generate && prisma migrate deploy && vite build",
+  "buildCommand": "prisma generate && prisma migrate deploy && prisma db seed && vite build",
   "outputDirectory": "dist",
   "framework": null,
   "functions": {

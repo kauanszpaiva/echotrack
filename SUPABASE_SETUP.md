@@ -38,20 +38,30 @@ npm run db:deploy   # applies prisma/migrations to Supabase
 
 ## 4. Create the first admin
 
-The app has no public admin signup. Create one either way below.
+The app has no public admin signup, so a fresh database has **zero users and
+every login fails** until an admin is created. Pick one option below.
 
-**Option A — seed script (local, one time):**
+**Option A — automatic during deploy (recommended):** set the bootstrap env
+vars in Vercel (step 5). The build runs `prisma db seed`, which creates/refreshes
+one admin. It is idempotent and opt-in — with no `BOOTSTRAP_ADMIN_PASSWORD` set
+it does nothing. Remove the password variable after the first successful deploy.
+
+**Option B — seed script (local, one time):**
 
 ```bash
-export DEV_ADMIN_EMAILS="you@kspdominion.group"
-export DEV_ADMIN_PASSWORD="a-strong-password"
-export NODE_ENV=development
+export BOOTSTRAP_ADMIN_EMAIL="you@kspdominion.group"
+export BOOTSTRAP_ADMIN_NAME="Your Name"
+export BOOTSTRAP_ADMIN_PASSWORD="a-strong-password"
 npm run db:seed
 ```
 
-**Option B — Supabase SQL editor:** insert a row into `users` with a bcrypt
+**Option C — Supabase SQL editor:** insert a row into `users` with a bcrypt
 hash for the password (`role = 'ADMIN'`, `account_status = 'ACTIVE'`,
 `is_active = true`). Generate a hash with `npx bcryptjs`.
+
+> Verify anytime with `GET /api/health` — it reports whether `JWT_SECRET` and
+> `DATABASE_URL` are set, whether the database is reachable, and how many active
+> accounts exist (`activeUsers`). If `activeUsers` is 0, nobody can log in yet.
 
 ## 5. Configure Vercel environment variables
 
@@ -65,6 +75,8 @@ Vercel dashboard → your project → **Settings → Environment Variables**
 | `JWT_SECRET`                    | `openssl rand -hex 32`                                        |
 | `CORS_ORIGINS`                  | your domain, e.g. `https://echotrack.vercel.app`              |
 | `NODE_ENV`                      | `production`                                                  |
+| `BOOTSTRAP_ADMIN_EMAIL`         | first admin's email (optional; default `kauan@kspdominion.group`) |
+| `BOOTSTRAP_ADMIN_PASSWORD`      | first admin's password (set once to bootstrap, then remove)   |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | full service-account JSON (one line) — only for social login  |
 
 ## 6. Firebase (social login only — Google / Microsoft / Apple)

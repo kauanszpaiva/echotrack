@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { authMiddleware, AuthRequest, roleMiddleware } from './auth.js';
-import { JWT_SECRET } from './config.js';
+import { getJwtSecret } from './config.js';
 import prisma from './prisma.js';
 
 const router = Router();
@@ -114,7 +114,7 @@ router.post('/auth/oauth', async (req, res) => {
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role, name: user.name },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '1d' }
     );
 
@@ -165,7 +165,7 @@ router.post('/setup-account', async (req: any, res: any) => {
         });
 
         // Automatically log them in
-        const jwtToken = jwt.sign({ id: updatedUser.id, email: updatedUser.email, role: updatedUser.role, name: updatedUser.name }, JWT_SECRET, { expiresIn: '1d' });
+        const jwtToken = jwt.sign({ id: updatedUser.id, email: updatedUser.email, role: updatedUser.role, name: updatedUser.name }, getJwtSecret(), { expiresIn: '1d' });
         
         res.cookie('token', jwtToken, getCookieOptions(req));
 
@@ -269,7 +269,7 @@ router.post('/signup', async (req, res) => {
              return user;
         });
 
-        const jwtToken = jwt.sign({ id: student.id, email: student.email, role: student.role, name: student.name }, JWT_SECRET, { expiresIn: '1d' });
+        const jwtToken = jwt.sign({ id: student.id, email: student.email, role: student.role, name: student.name }, getJwtSecret(), { expiresIn: '1d' });
         
         res.cookie('token', jwtToken, getCookieOptions(req));
 
@@ -513,7 +513,7 @@ router.post('/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role, name: user.name }, getJwtSecret(), { expiresIn: '1d' });
     
     console.log(`[LOGIN SUCCESS] User: ${user.name} (${user.role})`);
     res.cookie('token', token, getCookieOptions(req));

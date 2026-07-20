@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
-import { JWT_SECRET } from './config.js';
+import { getJwtSecret } from './config.js';
 import prisma from './prisma.js';
 
 export interface AuthRequest extends Request {
@@ -22,8 +22,15 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
     return res.status(403).json({ error: 'Cross-site request blocked' });
   }
 
+  let secret: string;
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as any;
+    secret = getJwtSecret();
+  } catch {
+    return res.status(500).json({ error: 'Server auth is misconfigured (JWT_SECRET). Contact the administrator.' });
+  }
+
+  try {
+    const payload = jwt.verify(token, secret) as any;
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
       select: { id: true, email: true, name: true, role: true, accountStatus: true, isActive: true }
