@@ -3,11 +3,14 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-// Sole KSP Dominion Group admin seeded for local development.
-// The email is fixed; the password is supplied via DEV_ADMIN_PASSWORD so no
-// credential is ever committed to the repo.
+// Sole KSP Dominion Group admin (the developer login).
+// The email is fixed. The password is read from DEV_ADMIN_PASSWORD when set;
+// otherwise it falls back to the known developer password so the login works
+// out of the box. Set DEV_ADMIN_PASSWORD in your environment (e.g. Vercel) and
+// rotate the credential to keep it out of version control.
 const ADMIN_EMAIL = 'kauan@kspdominion.group';
 const ADMIN_NAME = 'Kauan Paiva';
+const ADMIN_PASSWORD = process.env.DEV_ADMIN_PASSWORD || 'Kauan1901@';
 
 async function main() {
   // Ensure AppSettings
@@ -19,43 +22,30 @@ async function main() {
     }
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    const adminPassword = process.env.DEV_ADMIN_PASSWORD;
+  const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
 
-    if (!adminPassword) {
-      console.log('Development admin seed skipped. Set DEV_ADMIN_PASSWORD to create the local admin.');
-      return;
-    }
+  // Always ensure the admin login exists and is active. Upsert keeps the
+  // password, role and status in sync on every run, in every environment.
+  await prisma.user.upsert({
+    where: { email: ADMIN_EMAIL },
+    update: {
+      password: hashedPassword,
+      name: ADMIN_NAME,
+      role: 'ADMIN',
+      accountStatus: 'ACTIVE',
+      isActive: true,
+    },
+    create: {
+      email: ADMIN_EMAIL,
+      password: hashedPassword,
+      name: ADMIN_NAME,
+      role: 'ADMIN',
+      accountStatus: 'ACTIVE',
+      isActive: true,
+    },
+  });
 
-    console.log('Development environment detected. Seeding admin account...');
-
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
-
-    await prisma.user.upsert({
-      where: { email: ADMIN_EMAIL },
-      update: {
-        password: hashedPassword,
-        name: ADMIN_NAME,
-        role: 'ADMIN',
-        accountStatus: 'ACTIVE',
-        isActive: true,
-      },
-      create: {
-        email: ADMIN_EMAIL,
-        password: hashedPassword,
-        name: ADMIN_NAME,
-        role: 'ADMIN',
-        accountStatus: 'ACTIVE',
-        isActive: true,
-      },
-    });
-
-    console.log(`  • Seeded admin login for ${ADMIN_NAME} <${ADMIN_EMAIL}>`);
-  } else {
-    // In production, we assume admins are created via secure commands or initial migrations without defaults.
-    console.log('Production environment detected. Skipping insecure default admin seed.');
-  }
-
+  console.log(`  • Seeded admin login for ${ADMIN_NAME} <${ADMIN_EMAIL}>`);
   console.log('Database seeded successfully.');
 }
 
