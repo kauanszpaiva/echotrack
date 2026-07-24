@@ -1,8 +1,8 @@
 # EchoTrack — Supabase + Vercel Setup
 
-This app uses **Supabase Postgres** as its database (via Prisma) and keeps its
-existing login system (JWT + bcrypt for email/password, Firebase for social
-login). Follow these steps once to go live on Vercel.
+This app uses **Supabase Postgres** as its database (via Prisma) with a
+self-issued **JWT + bcrypt** login (email/password) against the `users` table.
+It does **not** use Supabase Auth. Follow these steps once to go live on Vercel.
 
 ---
 
@@ -38,47 +38,38 @@ npm run db:deploy   # applies prisma/migrations to Supabase
 
 ## 4. Create the first admin
 
-The app has no public admin signup. Create one either way below.
+The app has no public admin signup. The admin password is never hardcoded —
+you provide it via env and run the seed once.
 
-**Option A — seed script (local, one time):**
+**Option A — seed script (one time):**
 
 ```bash
-export DEV_ADMIN_EMAILS="you@kspdominion.group"
+export DEV_ADMIN_EMAIL="you@kspdominion.group"
 export DEV_ADMIN_PASSWORD="a-strong-password"
-export NODE_ENV=development
 npm run db:seed
 ```
 
 **Option B — Supabase SQL editor:** insert a row into `users` with a bcrypt
 hash for the password (`role = 'ADMIN'`, `account_status = 'ACTIVE'`,
-`is_active = true`). Generate a hash with `npx bcryptjs`.
+`is_active = true`).
+
+> The seed is **not** part of the Vercel build — run it manually against your
+> database whenever you need to create or reset the admin login.
 
 ## 5. Configure Vercel environment variables
 
 Vercel dashboard → your project → **Settings → Environment Variables**
 (set for **Production** + **Preview**):
 
-| Name                            | Value                                                         |
-| ------------------------------- | ------------------------------------------------------------- |
-| `DATABASE_URL`                  | pooled URL from step 2 (port 6543, `?pgbouncer=true`)         |
-| `DIRECT_URL`                    | direct URL from step 2 (port 5432)                            |
-| `JWT_SECRET`                    | `openssl rand -hex 32`                                        |
-| `CORS_ORIGINS`                  | your domain, e.g. `https://echotrack.vercel.app`              |
-| `NODE_ENV`                      | `production`                                                  |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | full service-account JSON (one line) — only for social login  |
+| Name           | Value                                                   |
+| -------------- | ------------------------------------------------------- |
+| `DATABASE_URL` | pooled URL from step 2 (port 6543, `?pgbouncer=true`)   |
+| `DIRECT_URL`   | direct URL from step 2 (port 5432)                      |
+| `JWT_SECRET`   | `openssl rand -hex 32`                                  |
+| `CORS_ORIGINS` | your domain, e.g. `https://echotrack.vercel.app`        |
+| `NODE_ENV`     | `production`                                            |
 
-## 6. Firebase (social login only — Google / Microsoft / Apple)
-
-Skip if you only use email/password.
-
-1. Firebase Console → **Authentication → Sign-in method** → enable Google (and Microsoft/Apple if wanted).
-2. **Authentication → Settings → Authorized domains** → add your Vercel domain.
-3. Project settings → Service accounts → **Generate new private key** → paste that JSON into the `FIREBASE_SERVICE_ACCOUNT_JSON` Vercel variable.
-
-> Note: OAuth users must already exist in the `users` table (invited by an
-> admin). A social login for an unknown email returns 404 and sends the user to signup.
-
-## 7. Deploy
+## 6. Deploy
 
 Push to the connected branch (or `vercel --prod`). The build runs:
 
@@ -99,7 +90,8 @@ and serves the SPA from `dist/` with the API at `/api/*` (see `vercel.json`).
   migrations use `DIRECT_URL`. A single cached `PrismaClient` (`server/prisma.ts`)
   avoids exhausting connections on serverless.
 - **Auth:** JWT in an httpOnly cookie; bcrypt password hashes; role-based access
-  (`ADMIN` → `PROGRAM_MANAGER` → `COACH` / `INSTRUCTOR` → `STUDENT`).
+  (`ADMIN` → `PROGRAM_MANAGER` → `COACH` / `INSTRUCTOR` → `STUDENT`), enforced
+  server-side (`roleMiddleware`) and client-side (`ProtectedRoute`).
 
 ## Local development
 

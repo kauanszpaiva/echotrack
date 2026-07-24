@@ -1,6 +1,4 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
 
 import { safeFetch } from '../lib/fetchUtils';
 
@@ -15,7 +13,6 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  loginWithProvider: (provider: 'google' | 'microsoft' | 'apple') => Promise<void>;
   logout: () => void;
 }
 
@@ -27,7 +24,7 @@ function toLoginError(error: any) {
   }
 
   if (error?.code === 'AUTH_INVALID_CREDENTIALS') {
-    return new Error('Invalid email or password. Make sure this account exists in the EchoTrack users table, not only in Supabase Auth.');
+    return new Error('Invalid email or password.');
   }
 
   return error;
@@ -53,33 +50,11 @@ export function AuthProvider({ children }: { children: any }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
-      
+
       setUser(data.user);
     } catch (e: any) {
       console.error('Login error:', e);
       throw toLoginError(e);
-    }
-  };
-
-  const loginWithProvider = async (provider: 'google' | 'microsoft' | 'apple') => {
-    try {
-      const { signInWith } = await import('../firebase');
-      const result = await signInWith(provider);
-      
-      const data = await safeFetch('/api/auth/oauth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: result.idToken }),
-      });
-      
-      setUser(data.user);
-    } catch (error: any) {
-      if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain') || error.message?.includes('auth/unauthorized-domain')) {
-        const domain = window.location.hostname;
-        console.error(`[Firebase] Domain "${domain}" is not authorized.`);
-        throw new Error(`Domain not authorized. Please open Firebase Console and add "${domain}" to Authentication -> Settings -> Authorized Domains.`);
-      }
-      throw error;
     }
   };
 
@@ -93,7 +68,7 @@ export function AuthProvider({ children }: { children: any }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithProvider, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

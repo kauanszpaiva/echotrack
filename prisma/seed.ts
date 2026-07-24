@@ -3,29 +3,43 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-// Sole KSP Dominion Group admin (the developer login).
-// The email is fixed. The password is read from DEV_ADMIN_PASSWORD when set;
-// otherwise it falls back to the known developer password so the login works
-// out of the box. Set DEV_ADMIN_PASSWORD in your environment (e.g. Vercel) and
-// rotate the credential to keep it out of version control.
-const ADMIN_EMAIL = 'kauan@kspdominion.group';
+// Seeds the AppSettings singleton and (optionally) the first admin login.
+//
+// The admin credential is NEVER hardcoded. Provide it via environment:
+//   DEV_ADMIN_EMAIL    (optional, defaults to kauan@kspdominion.group)
+//   DEV_ADMIN_PASSWORD (required to create/refresh the admin — no default)
+//
+// Run once per environment, e.g.:
+//   DEV_ADMIN_PASSWORD='a-strong-password' npm run db:seed
+const ADMIN_EMAIL = (process.env.DEV_ADMIN_EMAIL || 'kauan@kspdominion.group').toLowerCase();
 const ADMIN_NAME = 'Kauan Paiva';
-const ADMIN_PASSWORD = process.env.DEV_ADMIN_PASSWORD || 'Kauan1901@';
+const ADMIN_PASSWORD = process.env.DEV_ADMIN_PASSWORD;
 
 async function main() {
-  // Ensure AppSettings
+  // Always ensure the AppSettings singleton exists.
   await prisma.appSettings.upsert({
     where: { id: 'singleton' },
     update: {},
-    create: {
-      id: 'singleton'
-    }
+    create: { id: 'singleton' },
   });
+  console.log('  • Ensured AppSettings singleton');
+
+  if (!ADMIN_PASSWORD) {
+    console.warn(
+      '  ! DEV_ADMIN_PASSWORD not set — skipping admin seed. ' +
+      'Set DEV_ADMIN_PASSWORD (and optionally DEV_ADMIN_EMAIL) to create the admin login.'
+    );
+    console.log('Database seeded successfully (settings only).');
+    return;
+  }
+
+  if (ADMIN_PASSWORD.length < 8) {
+    throw new Error('DEV_ADMIN_PASSWORD must be at least 8 characters.');
+  }
 
   const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
 
-  // Always ensure the admin login exists and is active. Upsert keeps the
-  // password, role and status in sync on every run, in every environment.
+  // Upsert keeps the password, role and status in sync on every run.
   await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
     update: {

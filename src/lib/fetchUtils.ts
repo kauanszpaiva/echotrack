@@ -31,9 +31,10 @@ export async function safeFetch(url: string, options: RequestInit = {}) {
       const err: any = new Error(data.error || `Request failed with status ${response.status}`);
       err.status = response.status;
       if (data.code) err.code = data.code;
-      // Copy other properties like email, name so caller can use them
+      // Copy other properties so callers can use them. Do NOT overwrite the
+      // built-in Error.name — store the server-provided name separately.
       if (data.email) err.email = data.email;
-      if (data.name) err.name = data.name;
+      if (data.name) err.displayName = data.name;
       throw err;
     }
     return data;

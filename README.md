@@ -1,6 +1,6 @@
 # KSP Dominion Group / EchoTrack Weekly Report System
 
-A role-based weekly report system for KSP Dominion Group and EchoTrack. 
+A role-based weekly report system for KSP Dominion Group and EchoTrack.
 Supports students submitting weekly reports, and Admin, Program Managers, Coaches, and Instructors reviewing, tracking, and engaging with those reports.
 
 ## Prerequisites
@@ -15,15 +15,20 @@ Supports students submitting weekly reports, and Admin, Program Managers, Coache
    `npm install`
 4. Run migrations against your database:
    `npm run db:deploy`
-   *(Optional)* Seed a local admin:
-   `DEV_ADMIN_EMAILS=you@example.com DEV_ADMIN_PASSWORD=strong-pass NODE_ENV=development npm run db:seed`
+5. *(Optional)* Seed the first admin login:
+   `DEV_ADMIN_EMAIL=you@example.com DEV_ADMIN_PASSWORD=strong-pass npm run db:seed`
 
 ## Deploy (Vercel + Supabase)
-See **`SUPABASE_SETUP.md`** for the full step-by-step (connection strings, env vars, Firebase social login).
+See **`SUPABASE_SETUP.md`** for the full step-by-step (connection strings, env vars).
 
 ## Running Locally
 Start both the Vite frontend and Express backend:
 `npm run dev`
+
+## Auth
+Login is email/password only: a self-issued JWT in an httpOnly cookie, with
+bcrypt password hashes stored in the Supabase `users` table. Role-based access
+is enforced both server-side (`roleMiddleware`) and client-side (`ProtectedRoute`).
 
 ## Roles
 - **Admin**: Full access.
