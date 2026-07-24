@@ -21,6 +21,18 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
+function toLoginError(error: any) {
+  if (error?.code === 'ACCOUNT_INACTIVE') {
+    return new Error('Account is not active. If you were invited, open your setup link first; otherwise contact an administrator.');
+  }
+
+  if (error?.code === 'AUTH_INVALID_CREDENTIALS') {
+    return new Error('Invalid email or password. Make sure this account exists in the EchoTrack users table, not only in Supabase Auth.');
+  }
+
+  return error;
+}
+
 export function AuthProvider({ children }: { children: any }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,7 +57,7 @@ export function AuthProvider({ children }: { children: any }) {
       setUser(data.user);
     } catch (e: any) {
       console.error('Login error:', e);
-      throw e;
+      throw toLoginError(e);
     }
   };
 

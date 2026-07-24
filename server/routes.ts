@@ -59,6 +59,10 @@ const PERFORMANCE_LEVELS = new Set(['EXCEEDING', 'MEETING', 'APPROACHING', 'BEGI
 
 console.log("[SERVER] Mounting routes...");
 
+function authError(res: any, status: number, code: string, message: string) {
+  return res.status(status).json({ code, error: message });
+}
+
 function getCookieOptions(req: any) {
   const sameSite = process.env.COOKIE_SAMESITE === 'none' || process.env.FRONTEND_EMBEDDED === 'true' ? 'none' : 'lax';
   const forwardedProto = String(req.get?.('x-forwarded-proto') || '');
@@ -491,7 +495,7 @@ router.post('/auth/login', async (req, res) => {
     const { email, password } = req.body;
     const normalizedEmail = requiredString(email, 'email', 256).toLowerCase();
     if (!password || typeof password !== 'string') {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
     }
     console.log(`[LOGIN ATTEMPT] Email: ${normalizedEmail}`);
 
@@ -499,18 +503,23 @@ router.post('/auth/login', async (req, res) => {
     
     if (!user) {
       console.log(`[LOGIN FAILED] User not found: ${email}`);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
     }
 
     if (user.accountStatus !== 'ACTIVE' || !user.isActive) {
       console.log(`[LOGIN FAILED] User inactive or pending: ${email}, status: ${user.accountStatus}`);
-      return res.status(401).json({ error: 'Account is not active' });
+      return authError(res, 401, 'ACCOUNT_INACTIVE', 'Account is not active');
+    }
+
+    if (!user.password || !user.password.startsWith('$2')) {
+      console.log(`[LOGIN FAILED] Missing or invalid bcrypt password hash for: ${email}`);
+      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
     }
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
       console.log(`[LOGIN FAILED] Wrong password for: ${email}`);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
     }
 
     const token = jwt.sign({ id: user.id, email: user.email, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '1d' });
@@ -527,7 +536,11 @@ router.post('/auth/login', async (req, res) => {
 
     res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role } });
   } catch (err: any) {
-    res.status(err.status || 500).json({ error: err.status ? err.message : 'Internal error' });
+    console.error('[LOGIN ERROR]', err);
+    res.status(err.status || 500).json({
+      code: err.status ? 'LOGIN_VALIDATION_ERROR' : 'LOGIN_SERVER_ERROR',
+      error: err.status ? err.message : 'Internal error'
+    });
   }
 });
 
