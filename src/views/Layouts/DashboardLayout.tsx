@@ -4,8 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { 
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
-  GraduationCap, AlertTriangle, ShieldAlert
-  GraduationCap, AlertTriangle, Award
+  GraduationCap, AlertTriangle, ShieldAlert, Award
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
 import { ROLE_BADGE } from '../../types';
