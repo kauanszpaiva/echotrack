@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { 
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
+  GraduationCap, AlertTriangle, ShieldAlert
   GraduationCap, AlertTriangle, Award
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
@@ -37,6 +38,7 @@ export function DashboardLayout() {
           { label: 'Communities',      href: '/admin/communities',        icon: Users },
           { label: 'Report Cycles',    href: '/admin/cycles',             icon: Calendar },
           { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
+          { label: 'Conduct Points',   href: '/admin/conduct',            icon: ShieldAlert },
           { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
           { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 },
           { label: 'Contract Points',  href: '/admin/contract-points',    icon: Award },
@@ -53,7 +55,8 @@ export function DashboardLayout() {
         ];
       case 'INSTRUCTOR':
         return [
-          { label: 'Dashboard',  href: '/instructor',          icon: LayoutDashboard }
+          { label: 'Dashboard',      href: '/instructor',          icon: LayoutDashboard },
+          { label: 'Conduct Points', href: '/instructor/conduct',  icon: ShieldAlert }
         ];
       case 'COACH':
         return [
