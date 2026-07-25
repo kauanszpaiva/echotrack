@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
   GraduationCap, AlertTriangle, ShieldAlert
+  GraduationCap, AlertTriangle, Award
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
 import { ROLE_BADGE } from '../../types';
@@ -40,6 +41,7 @@ export function DashboardLayout() {
           { label: 'Conduct Points',   href: '/admin/conduct',            icon: ShieldAlert },
           { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
           { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 },
+          { label: 'Contract Points',  href: '/admin/contract-points',    icon: Award },
           { label: 'Audit Logs',       href: '/admin/audit',              icon: ClipboardList },
           { label: 'Settings',         href: '/admin/settings',           icon: Settings },
         ];

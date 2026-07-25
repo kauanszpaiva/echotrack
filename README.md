@@ -9,8 +9,8 @@ Supports students submitting weekly reports, and Admin, Program Managers, Coache
 
 ## Setup
 1. Copy the example environment file:
-   `cp .env.example .env`
-2. Fill `.env` with your Supabase `DATABASE_URL` + `DIRECT_URL` and a secure `JWT_SECRET`.
+   `cp .env.example .env.local`
+2. Fill `.env.local` with the Supabase browser URL/anon key, database URLs, and a secure `JWT_SECRET`.
 3. Install dependencies:
    `npm install`
 4. Run migrations against your database:

@@ -20,14 +20,16 @@ import { TargetedQuestions } from './views/Admin/TargetedQuestions';
 import { Analytics } from './views/Admin/Analytics';
 import { AuditLogs } from './views/Admin/AuditLogs';
 import { Settings } from './views/Admin/Settings';
+import { ContractPoints } from './views/Admin/ContractPoints';
 
 import { useEffect } from 'react';
 
 function DashboardRedirect() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (loading) return;
     if (!user) {
       navigate('/login');
       return;
@@ -40,7 +42,7 @@ function DashboardRedirect() {
       case 'STUDENT': navigate('/student'); break;
       default: navigate('/login'); break;
     }
-  }, [user, navigate]);
+  }, [user, loading, navigate]);
 
   return <div>Redirecting...</div>;
 }
@@ -79,6 +81,7 @@ export default function App() {
           <Route path="/admin/audit" element={<AuditLogs />} />
           <Route path="/admin/conduct" element={<ConductTracker />} />
           <Route path="/admin/settings" element={<Settings />} />
+          <Route path="/admin/contract-points" element={<ContractPoints />} />
           <Route path="/admin/reports/:id" element={<ReportDetail />} />
 
           <Route path="/pm" element={<PMDashboard />} />
