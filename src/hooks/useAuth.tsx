@@ -1,8 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-
-import { safeFetch } from '../lib/fetchUtils';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabaseClient';
 
 interface User {
   id: string;
@@ -16,21 +14,30 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   loginWithProvider: (provider: 'google' | 'microsoft' | 'apple') => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
-function toLoginError(error: any) {
-  if (error?.code === 'ACCOUNT_INACTIVE') {
-    return new Error('Account is not active. If you were invited, open your setup link first; otherwise contact an administrator.');
-  }
+function toAppUser(user: SupabaseUser): User {
+  const metadata = user.user_metadata ?? {};
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    name: metadata.full_name ?? metadata.name ?? user.email?.split('@')[0] ?? 'User',
+    role: metadata.role ?? 'STUDENT',
+  };
+}
 
-  if (error?.code === 'AUTH_INVALID_CREDENTIALS') {
-    return new Error('Invalid email or password. Make sure this account exists in the EchoTrack users table, not only in Supabase Auth.');
+function toLoginError(error: { message?: string }) {
+  const message = error.message?.toLowerCase() ?? '';
+  if (message.includes('email not confirmed')) {
+    return new Error('Please verify your email address before signing in.');
   }
-
-  return error;
+  if (message.includes('invalid login credentials')) {
+    return new Error('Invalid email or password. Please check your details and try again.');
+  }
+  return new Error(error.message || 'Unable to sign in. Please try again.');
 }
 
 export function AuthProvider({ children }: { children: any }) {
@@ -38,23 +45,37 @@ export function AuthProvider({ children }: { children: any }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    safeFetch('/api/auth/session')
-      .then(data => setUser(data.user || null))
-      .catch(() => {
-        setUser(null);
-      })
-      .finally(() => setLoading(false));
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) console.error('Session check failed:', error.message);
+      setUser(data.session?.user ? toAppUser(data.session.user) : null);
+      setLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (mounted) {
+        setUser(session?.user ? toAppUser(session.user) : null);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
     try {
-      const data = await safeFetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
       });
-      
-      setUser(data.user);
+      if (error) throw error;
+      if (!data.user) throw new Error('Supabase did not return a user session.');
+      setUser(toAppUser(data.user));
     } catch (e: any) {
       console.error('Login error:', e);
       throw toLoginError(e);
@@ -63,32 +84,20 @@ export function AuthProvider({ children }: { children: any }) {
 
   const loginWithProvider = async (provider: 'google' | 'microsoft' | 'apple') => {
     try {
-      const { signInWith } = await import('../firebase');
-      const result = await signInWith(provider);
-      
-      const data = await safeFetch('/api/auth/oauth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: result.idToken }),
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: provider === 'microsoft' ? 'azure' : provider,
+        options: { redirectTo: `${window.location.origin}/dashboard-redirect` },
       });
-      
-      setUser(data.user);
-    } catch (error: any) {
-      if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain') || error.message?.includes('auth/unauthorized-domain')) {
-        const domain = window.location.hostname;
-        console.error(`[Firebase] Domain "${domain}" is not authorized.`);
-        throw new Error(`Domain not authorized. Please open Firebase Console and add "${domain}" to Authentication -> Settings -> Authorized Domains.`);
-      }
+      if (error) throw error;
+    } catch (error) {
+      console.error('OAuth login error:', error);
       throw error;
     }
   };
 
   const logout = async () => {
-    try {
-      await safeFetch('/api/auth/logout', { method: 'POST' });
-    } catch(e) {
-      console.error('Logout error:', e);
-    }
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error('Logout error:', error.message);
     setUser(null);
   };
 

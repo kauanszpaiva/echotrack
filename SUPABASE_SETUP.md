@@ -1,8 +1,7 @@
 # EchoTrack — Supabase + Vercel Setup
 
-This app uses **Supabase Postgres** as its database (via Prisma) and keeps its
-existing login system (JWT + bcrypt for email/password, Firebase for social
-login). Follow these steps once to go live on Vercel.
+This app uses **Supabase Auth** in the browser and **Supabase Postgres** as its
+database (via Prisma). Follow these steps once to go live on Vercel.
 
 ---
 
@@ -13,6 +12,11 @@ login). Follow these steps once to go live on Vercel.
 3. Wait for provisioning to finish.
 
 ## 2. Get the connection strings
+
+In **Project Settings → API**, copy the project URL and anon/publishable key to
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. These values are designed for
+browser use; authorization must be enforced with Row Level Security. Never use
+the service-role key in a `VITE_` variable.
 
 In the project: **Connect** (top bar) → **ORMs** → **Prisma**. Copy the two URLs:
 
@@ -38,20 +42,11 @@ npm run db:deploy   # applies prisma/migrations to Supabase
 
 ## 4. Create the first admin
 
-The app has no public admin signup. Create one either way below.
-
-**Option A — seed script (local, one time):**
-
-```bash
-export DEV_ADMIN_EMAILS="you@kspdominion.group"
-export DEV_ADMIN_PASSWORD="a-strong-password"
-export NODE_ENV=development
-npm run db:seed
-```
-
-**Option B — Supabase SQL editor:** insert a row into `users` with a bcrypt
-hash for the password (`role = 'ADMIN'`, `account_status = 'ACTIVE'`,
-`is_active = true`). Generate a hash with `npx bcryptjs`.
+Create the user in **Authentication → Users** in the Supabase dashboard. Set
+`role` to `ADMIN` in that user's metadata (and create the matching application
+profile row if your database workflows require one). Never authorize sensitive
+server operations from user-editable metadata; verify roles server-side or with
+RLS claims.
 
 ## 5. Configure Vercel environment variables
 
@@ -65,18 +60,15 @@ Vercel dashboard → your project → **Settings → Environment Variables**
 | `JWT_SECRET`                    | `openssl rand -hex 32`                                        |
 | `CORS_ORIGINS`                  | your domain, e.g. `https://echotrack.vercel.app`              |
 | `NODE_ENV`                      | `production`                                                  |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | full service-account JSON (one line) — only for social login  |
+| `VITE_SUPABASE_URL`             | project URL from Supabase Project Settings → API              |
+| `VITE_SUPABASE_ANON_KEY`        | anon/publishable key from Supabase Project Settings → API     |
 
-## 6. Firebase (social login only — Google / Microsoft / Apple)
+## 6. Supabase OAuth (optional — Google / Microsoft / Apple)
 
 Skip if you only use email/password.
 
-1. Firebase Console → **Authentication → Sign-in method** → enable Google (and Microsoft/Apple if wanted).
-2. **Authentication → Settings → Authorized domains** → add your Vercel domain.
-3. Project settings → Service accounts → **Generate new private key** → paste that JSON into the `FIREBASE_SERVICE_ACCOUNT_JSON` Vercel variable.
-
-> Note: OAuth users must already exist in the `users` table (invited by an
-> admin). A social login for an unknown email returns 404 and sends the user to signup.
+Enable each provider in **Supabase Dashboard → Authentication → Providers** and
+add the app's `/dashboard-redirect` URL to the allowed redirect URLs.
 
 ## 7. Deploy
 
@@ -98,13 +90,13 @@ and serves the SPA from `dist/` with the API at `/api/*` (see `vercel.json`).
 - **DB:** Supabase Postgres via Prisma. Runtime uses the pooled `DATABASE_URL`;
   migrations use `DIRECT_URL`. A single cached `PrismaClient` (`server/prisma.ts`)
   avoids exhausting connections on serverless.
-- **Auth:** JWT in an httpOnly cookie; bcrypt password hashes; role-based access
-  (`ADMIN` → `PROGRAM_MANAGER` → `COACH` / `INSTRUCTOR` → `STUDENT`).
+- **Auth:** Supabase Auth sessions with automatic token refresh. Application
+  roles are read from user metadata and default to `STUDENT`.
 
 ## Local development
 
 ```bash
-cp .env.example .env      # fill DATABASE_URL, DIRECT_URL, JWT_SECRET
+cp .env.example .env.local # fill Supabase client and database values
 npm install
 npm run db:deploy
 npm run dev               # http://localhost:3000
