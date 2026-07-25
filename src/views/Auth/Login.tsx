@@ -36,12 +36,14 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
     try {
+      localStorage.setItem('supabase_remember_me', rememberMe ? 'true' : 'false');
       await login(email, password);
       navigate('/dashboard-redirect');
     } catch (err: any) {
@@ -94,6 +96,19 @@ export function Login() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <Input label="Email" type="email" value={email} onChange={(v: string) => setEmail(v)} required autoComplete="email" />
               <Input label="Password" type="password" value={password} onChange={(v: string) => setPassword(v)} required autoComplete="current-password" />
+
+              <div className="flex items-center justify-between py-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded text-[#FF7A00] focus:ring-[#FF7A00] border-gray-300"
+                  />
+                  <span className="text-sm font-semibold text-gray-600">Remember me</span>
+                </label>
+              </div>
+
               <Button type="submit" disabled={loading} className="w-full h-12 text-base mt-2">
                 {loading ? <><LoaderCircle className="w-4 h-4 animate-spin" /> Signing in…</> : 'Sign In'}
               </Button>
