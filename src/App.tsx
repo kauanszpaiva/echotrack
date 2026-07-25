@@ -20,6 +20,7 @@ import { TargetedQuestions } from './views/Admin/TargetedQuestions';
 import { Analytics } from './views/Admin/Analytics';
 import { AuditLogs } from './views/Admin/AuditLogs';
 import { Settings } from './views/Admin/Settings';
+import { ContractPoints } from './views/Admin/ContractPoints';
 
 import { useEffect } from 'react';
 
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="/admin/analytics" element={<Analytics />} />
           <Route path="/admin/audit" element={<AuditLogs />} />
           <Route path="/admin/settings" element={<Settings />} />
+          <Route path="/admin/contract-points" element={<ContractPoints />} />
           <Route path="/admin/reports/:id" element={<ReportDetail />} />
 
           <Route path="/pm" element={<PMDashboard />} />
