@@ -30,3 +30,19 @@ export interface SessionUser {
   name: string;
   role: UserRole;
 }
+
+export type ConductEntryType = 'INFRACTION' | 'CONVERSATION';
+export type ConductEntryStatus = 'PENDING' | 'APPROVED' | 'CLEARED';
+
+export interface ConductEntry {
+  id: string;
+  type: ConductEntryType;
+  points: number;
+  summary: string;
+  followUp: string;
+  status: ConductEntryStatus;
+  createdAt: string;
+  student: { id: string; name: string; email: string };
+  author: { id: string; name: string; role: UserRole };
+  reviewer?: { id: string; name: string } | null;
+}

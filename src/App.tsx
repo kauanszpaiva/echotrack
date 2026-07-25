@@ -51,6 +51,7 @@ import { PMDashboard } from './views/PM/PMDashboard';
 import { CoachDashboard } from './views/Coach/CoachDashboard';
 import { InstructorDashboard } from './views/Instructor/InstructorDashboard';
 import { ReportDetail } from './views/Admin/ReportDetail';
+import { ConductTracker } from './views/Conduct/ConductTracker';
 
 export default function App() {
   return (
@@ -76,6 +77,7 @@ export default function App() {
           <Route path="/admin/targeted-questions" element={<TargetedQuestions />} />
           <Route path="/admin/analytics" element={<Analytics />} />
           <Route path="/admin/audit" element={<AuditLogs />} />
+          <Route path="/admin/conduct" element={<ConductTracker />} />
           <Route path="/admin/settings" element={<Settings />} />
           <Route path="/admin/reports/:id" element={<ReportDetail />} />
 
@@ -86,6 +88,7 @@ export default function App() {
           <Route path="/coach/reports/:id" element={<ReportDetail />} />
           
           <Route path="/instructor" element={<InstructorDashboard />} />
+          <Route path="/instructor/conduct" element={<ConductTracker />} />
           <Route path="/instructor/reports/:id" element={<ReportDetail />} />
 
           <Route path="/student" element={<StudentDashboard />} />
