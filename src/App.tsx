@@ -24,10 +24,11 @@ import { Settings } from './views/Admin/Settings';
 import { useEffect } from 'react';
 
 function DashboardRedirect() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (loading) return;
     if (!user) {
       navigate('/login');
       return;
@@ -40,7 +41,7 @@ function DashboardRedirect() {
       case 'STUDENT': navigate('/student'); break;
       default: navigate('/login'); break;
     }
-  }, [user, navigate]);
+  }, [user, loading, navigate]);
 
   return <div>Redirecting...</div>;
 }

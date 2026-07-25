@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { Logo } from '../../components/Logo';
 import { Button, Input, Card } from '../../components/ui/Common';
+import { LoaderCircle } from 'lucide-react';
 
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
@@ -91,10 +92,10 @@ export function Login() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <Input label="Email" type="email" value={email} onChange={(v: string) => setEmail(v)} />
-              <Input label="Password" type="password" value={password} onChange={(v: string) => setPassword(v)} />
+              <Input label="Email" type="email" value={email} onChange={(v: string) => setEmail(v)} required autoComplete="email" />
+              <Input label="Password" type="password" value={password} onChange={(v: string) => setPassword(v)} required autoComplete="current-password" />
               <Button type="submit" disabled={loading} className="w-full h-12 text-base mt-2">
-                {loading ? 'Signing in…' : 'Sign In'}
+                {loading ? <><LoaderCircle className="w-4 h-4 animate-spin" /> Signing in…</> : 'Sign In'}
               </Button>
             </form>
 
