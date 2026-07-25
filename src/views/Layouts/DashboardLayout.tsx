@@ -4,7 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { 
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
-  GraduationCap, AlertTriangle
+  GraduationCap, AlertTriangle, Award
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
 import { ROLE_BADGE } from '../../types';
@@ -39,6 +39,7 @@ export function DashboardLayout() {
           { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
           { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
           { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 },
+          { label: 'Contract Points',  href: '/admin/contract-points',    icon: Award },
           { label: 'Audit Logs',       href: '/admin/audit',              icon: ClipboardList },
           { label: 'Settings',         href: '/admin/settings',           icon: Settings },
         ];
