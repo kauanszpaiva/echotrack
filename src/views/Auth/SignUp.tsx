@@ -3,6 +3,7 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Card, Button, Input, Select } from '../../components/ui/Common';
 import { safeFetch } from '../../lib/fetchUtils';
+import { supabase } from '../../lib/supabaseClient';
 import { Logo } from '../../components/Logo';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -69,9 +70,20 @@ export function SignUp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       });
-      
+
+      // The account now exists in Supabase Auth — establish the session.
+      const { error } = await supabase.auth.signInWithPassword({
+        email: formData.email.trim(),
+        password: formData.password,
+      });
+      if (error) {
+        toast.success('Registration successful! Please sign in.');
+        setTimeout(() => { window.location.href = '/login'; }, 1000);
+        return;
+      }
+
       toast.success('Registration successful!');
-      setTimeout(() => { window.location.href = '/dashboard-redirect'; }, 1000);
+      setTimeout(() => { window.location.href = '/dashboard-redirect'; }, 500);
     } catch (err: any) {
       toast.error(err.message || 'Signup failed');
     } finally {

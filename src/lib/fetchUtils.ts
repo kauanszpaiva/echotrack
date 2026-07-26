@@ -1,10 +1,22 @@
+import { supabase } from './supabaseClient';
+
+/** Attach the current Supabase access token so the API can authenticate the request. */
+async function withAuthHeaders(init: HeadersInit = {}): Promise<Headers> {
+  const headers = new Headers(init);
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  return headers;
+}
 
 /**
  * A safe fetch wrapper that reads response as text first to handle non-JSON errors gracefully.
  * This prevents "Unexpected token <" errors and provides better debugging info.
  */
 export async function safeFetch(url: string, options: RequestInit = {}) {
-  const headers = new Headers(options.headers || {});
+  const headers = await withAuthHeaders(options.headers);
 
   const response = await fetch(url, {
     ...options,
@@ -45,7 +57,7 @@ export async function safeFetch(url: string, options: RequestInit = {}) {
 }
 
 export async function downloadFile(url: string, filename: string) {
-  const headers = new Headers();
+  const headers = await withAuthHeaders();
 
   const response = await fetch(url, { headers, credentials: 'include' });
   if (!response.ok) {

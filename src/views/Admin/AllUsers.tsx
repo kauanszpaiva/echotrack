@@ -5,6 +5,7 @@ import { safeFetch } from '../../lib/fetchUtils';
 import { Search, UserPlus, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../hooks/useAuth';
+import { isAdminLevel } from '../../../shared/roles';
 
 export function AllUsers() {
   const { user } = useAuth();
@@ -16,7 +17,7 @@ export function AllUsers() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
-  const [inviteRole, setInviteRole] = useState(user?.role === 'ADMIN' ? 'PROGRAM_MANAGER' : 'COACH');
+  const [inviteRole, setInviteRole] = useState(isAdminLevel(user?.role) ? 'PROGRAM_MANAGER' : 'COACH');
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -76,7 +77,7 @@ export function AllUsers() {
     }
   };
 
-  const roles = ['ALL', 'PROGRAM_MANAGER', 'COACH', 'INSTRUCTOR', 'STUDENT'];
+  const roles = ['ALL', 'DEV', 'PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'STUDENT', 'INTERN'];
 
   const filtered = users.filter(u => 
     (filter === 'ALL' || u.role === filter) &&
@@ -98,7 +99,7 @@ export function AllUsers() {
       <div className="flex flex-col md:flex-row gap-6">
           <Card className="p-6 w-full md:w-1/3 h-fit border-[#E5E7EB]">
              <h2 className="font-bold text-[#0A0A0A] mb-2">Register Staff</h2>
-             <p className="text-xs text-[#6B7280] mb-4">Coaches and Instructors are created by Program Managers. Students self-register through the signup link.</p>
+             <p className="text-xs text-[#6B7280] mb-4">Coaches, PSMs and Instructors are created by Program Managers. Students self-register through the signup link.</p>
              <form onSubmit={handleInvite} className="space-y-3">
                  <div className="space-y-1">
                    <label className="text-xs font-bold text-[#6B7280] uppercase tracking-wider">Role</label>
@@ -108,9 +109,12 @@ export function AllUsers() {
                        value={inviteRole}
                        onChange={e => setInviteRole(e.target.value)}
                      >
-                       {user?.role === 'ADMIN' && <option value="PROGRAM_MANAGER">Program Manager</option>}
+                       {user?.role === 'DEV' && <option value="DEV">Dev</option>}
+                       {isAdminLevel(user?.role) && <option value="PROGRAM_MANAGER">Program Manager</option>}
                        <option value="COACH">Coach</option>
+                       <option value="PSM">PSM</option>
                        <option value="INSTRUCTOR">Instructor</option>
+                       {isAdminLevel(user?.role) && <option value="INTERN">Intern</option>}
                      </select>
                      <ChevronDown className="w-4 h-4 text-[#9CA3AF] absolute right-4 top-3 pointer-events-none" />
                    </div>

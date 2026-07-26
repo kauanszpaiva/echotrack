@@ -42,11 +42,17 @@ npm run db:deploy   # applies prisma/migrations to Supabase
 
 ## 4. Create the first admin
 
-Create the user in **Authentication → Users** in the Supabase dashboard. Set
-`role` to `ADMIN` in that user's metadata (and create the matching application
-profile row if your database workflows require one). Never authorize sensitive
-server operations from user-editable metadata; verify roles server-side or with
-RLS claims.
+Easiest: run the seed after configuring env vars, which provisions the admin in
+Supabase Auth **and** Postgres:
+
+```bash
+DEV_ADMIN_PASSWORD='a-strong-password' npm run db:seed
+```
+
+Or create the user manually in **Authentication → Users**, then set the role in
+**`app_metadata`** (`{"role":"ADMIN"}`) — NOT `user_metadata`, which the user can
+edit. The backend only trusts `app_metadata`. The first authenticated request
+mirrors the user into the Postgres `users` table automatically.
 
 ## 5. Configure Vercel environment variables
 
@@ -57,11 +63,16 @@ Vercel dashboard → your project → **Settings → Environment Variables**
 | ------------------------------- | ------------------------------------------------------------- |
 | `DATABASE_URL`                  | pooled URL from step 2 (port 6543, `?pgbouncer=true`)         |
 | `DIRECT_URL`                    | direct URL from step 2 (port 5432)                            |
-| `JWT_SECRET`                    | `openssl rand -hex 32`                                        |
 | `CORS_ORIGINS`                  | your domain, e.g. `https://echotrack.vercel.app`              |
 | `NODE_ENV`                      | `production`                                                  |
 | `VITE_SUPABASE_URL`             | project URL from Supabase Project Settings → API              |
 | `VITE_SUPABASE_ANON_KEY`        | anon/publishable key from Supabase Project Settings → API     |
+| `SUPABASE_URL`                  | same project URL (server-side; used to validate access tokens)|
+| `SUPABASE_SERVICE_ROLE_KEY`     | **secret** service-role key (Project Settings → API). Never expose to the browser. |
+
+> `JWT_SECRET` is no longer required — authentication is unified on Supabase Auth.
+> The backend validates the Supabase access token the browser sends and reads the
+> user's role from `app_metadata` (admin-only, not user-editable).
 
 ## 6. Supabase OAuth (optional — Google / Microsoft / Apple)
 
@@ -90,8 +101,12 @@ and serves the SPA from `dist/` with the API at `/api/*` (see `vercel.json`).
 - **DB:** Supabase Postgres via Prisma. Runtime uses the pooled `DATABASE_URL`;
   migrations use `DIRECT_URL`. A single cached `PrismaClient` (`server/prisma.ts`)
   avoids exhausting connections on serverless.
-- **Auth:** Supabase Auth sessions with automatic token refresh. Application
-  roles are read from user metadata and default to `STUDENT`.
+- **Auth:** unified on Supabase Auth. The browser signs in with Supabase and
+  sends the access token to the API (`Authorization: Bearer …`); the backend
+  validates it and reads the role from `app_metadata` (authoritative, admin-only),
+  mirroring the user into Postgres (joined by email) for relational queries.
+  Roles: `DEV`, `ADMIN`, `PROGRAM_MANAGER`, `COACH`, `PSM`, `STUDENT`, `INTERN`,
+  `INSTRUCTOR` (default `STUDENT`).
 
 ## Local development
 

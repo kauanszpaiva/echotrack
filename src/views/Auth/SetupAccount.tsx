@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Card, Button, Input } from '../../components/ui/Common';
 import { safeFetch } from '../../lib/fetchUtils';
+import { supabase } from '../../lib/supabaseClient';
 import { Logo } from '../../components/Logo';
 
 export function SetupAccount() {
@@ -21,16 +22,28 @@ export function SetupAccount() {
 
     setLoading(true);
     try {
-      await safeFetch('/api/setup-account', {
+      const res = await safeFetch('/api/setup-account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, password })
       });
 
+      // The Supabase Auth account was just created — establish the session.
+      const email = res?.user?.email;
+      const { error } = email
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : { error: new Error('missing email') };
+
+      if (error) {
+        toast.success('Account setup complete! Please sign in.');
+        setTimeout(() => { window.location.href = '/login'; }, 1000);
+        return;
+      }
+
       toast.success('Account setup complete! Redirecting...');
       setTimeout(() => {
          window.location.href = '/dashboard-redirect';
-      }, 1000);
+      }, 500);
     } catch (err: any) {
       toast.error(err.message || 'Failed to setup account');
     } finally {

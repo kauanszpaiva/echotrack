@@ -1,63 +1,58 @@
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
+import { provisionSupabaseAuthUser, isSupabaseAdminConfigured } from '../server/supabaseAdmin.js';
 
 const prisma = new PrismaClient();
 
-// Sole KSP Dominion Group admin seeded for local development.
-// The email is fixed; the password is supplied via DEV_ADMIN_PASSWORD so no
-// credential is ever committed to the repo.
+// Sole KSP Dominion Group admin seeded on setup. The email is fixed; the
+// password is supplied via DEV_ADMIN_PASSWORD so no credential is committed.
+// Authentication is unified on Supabase Auth: the admin is created there (role
+// authoritative in app_metadata) and mirrored into Postgres.
 const ADMIN_EMAIL = 'kauan@kspdominion.group';
 const ADMIN_NAME = 'Kauan Paiva';
 
 async function main() {
-  // Ensure AppSettings
+  // Ensure AppSettings singleton exists.
   await prisma.appSettings.upsert({
     where: { id: 'singleton' },
     update: {},
-    create: {
-      id: 'singleton'
-    }
+    create: { id: 'singleton' },
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    const adminPassword = process.env.DEV_ADMIN_PASSWORD;
+  const adminPassword = process.env.DEV_ADMIN_PASSWORD;
 
-    if (!adminPassword) {
-      console.log('Development admin seed skipped. Set DEV_ADMIN_PASSWORD to create the local admin.');
-      return;
-    }
-
-    console.log('Development environment detected. Seeding admin account...');
-
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
-
-    // Always ensure the admin login exists and is active. Upsert keeps the
-    // password, role and status in sync on every run, in every environment.
-    await prisma.user.upsert({
-      where: { email: ADMIN_EMAIL },
-      update: {
-        password: hashedPassword,
-        name: ADMIN_NAME,
-        role: 'ADMIN',
-        accountStatus: 'ACTIVE',
-        isActive: true,
-      },
-      create: {
-        email: ADMIN_EMAIL,
-        password: hashedPassword,
-        name: ADMIN_NAME,
-        role: 'ADMIN',
-        accountStatus: 'ACTIVE',
-        isActive: true,
-      },
-    });
-
-    console.log(`  • Seeded admin login for ${ADMIN_NAME} <${ADMIN_EMAIL}>`);
-  } else {
-    // In production, we assume admins are created via secure commands or initial migrations without defaults.
-    console.log('Production environment detected. Skipping insecure default admin seed.');
+  if (!isSupabaseAdminConfigured()) {
+    console.log('Admin seed skipped: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to provision the admin in Supabase Auth.');
+    return;
+  }
+  if (!adminPassword) {
+    console.log('Admin seed skipped: set DEV_ADMIN_PASSWORD to create the admin login.');
+    return;
   }
 
+  console.log('Provisioning admin in Supabase Auth...');
+  const supabaseUserId = await provisionSupabaseAuthUser({
+    email: ADMIN_EMAIL,
+    password: adminPassword,
+    name: ADMIN_NAME,
+    role: 'ADMIN',
+  });
+
+  // Mirror into Postgres (joined by email; keep the Supabase id on create).
+  await prisma.user.upsert({
+    where: { email: ADMIN_EMAIL },
+    update: { name: ADMIN_NAME, role: 'ADMIN', accountStatus: 'ACTIVE', isActive: true },
+    create: {
+      id: supabaseUserId,
+      email: ADMIN_EMAIL,
+      name: ADMIN_NAME,
+      role: 'ADMIN',
+      accountStatus: 'ACTIVE',
+      isActive: true,
+      password: '',
+    },
+  });
+
+  console.log(`  • Seeded admin ${ADMIN_NAME} <${ADMIN_EMAIL}> (Supabase + Postgres)`);
   console.log('Database seeded successfully.');
 }
 

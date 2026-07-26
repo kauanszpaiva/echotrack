@@ -21,6 +21,7 @@ import { Analytics } from './views/Admin/Analytics';
 import { AuditLogs } from './views/Admin/AuditLogs';
 import { Settings } from './views/Admin/Settings';
 import { ContractPoints } from './views/Admin/ContractPoints';
+import { DevPanel } from './views/Dev/DevPanel';
 
 import { useEffect } from 'react';
 
@@ -35,11 +36,14 @@ function DashboardRedirect() {
       return;
     }
     switch (user.role) {
+      case 'DEV': navigate('/admin'); break;
       case 'ADMIN': navigate('/admin'); break;
       case 'PROGRAM_MANAGER': navigate('/pm'); break;
       case 'INSTRUCTOR': navigate('/instructor'); break;
       case 'COACH': navigate('/coach'); break;
+      case 'PSM': navigate('/coach'); break;
       case 'STUDENT': navigate('/student'); break;
+      case 'INTERN': navigate('/student'); break;
       default: navigate('/login'); break;
     }
   }, [user, loading, navigate]);
@@ -68,6 +72,7 @@ export default function App() {
         <Route path="/dashboard-redirect" element={<DashboardRedirect />} />
         
         <Route element={<DashboardLayout />}>
+          <Route path="/dev" element={<DevPanel />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/staff" element={<ProgramManagers />} />
           <Route path="/admin/users" element={<AllUsers />} />
