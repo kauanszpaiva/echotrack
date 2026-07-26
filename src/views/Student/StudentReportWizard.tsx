@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, Button, Input } from '../../components/ui/Common';
 import { useAuth } from '../../hooks/useAuth';
 import { safeFetch } from '../../lib/fetchUtils';
+import { safeJsonParse } from '../../lib/storage';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 
@@ -59,7 +60,7 @@ export function StudentReportWizard() {
                 classExperience: report.classExperience || '',
                 events: report.events || '',
                 upcomingEvents: report.upcomingEvents || '',
-                challengesTags: JSON.parse(report.challengesTags || '[]'),
+                challengesTags: safeJsonParse<string[]>(report.challengesTags, []),
                 challengesText: report.challengesText || '',
                 needsSupport: report.needsSupport ?? false,
                 supportNeeded: report.supportNeeded || '',

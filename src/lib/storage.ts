@@ -14,3 +14,17 @@ export const getStorageItem = <T>(key: string, defaultValue: T): T => {
 export const setStorageItem = <T>(key: string, value: T): void => {
   localStorage.setItem(key, JSON.stringify(value));
 };
+
+/**
+ * Parse a JSON string, returning `fallback` if the value is empty or malformed.
+ * Prevents a bad DB value from throwing during render and blanking a route.
+ */
+export const safeJsonParse = <T>(value: string | null | undefined, fallback: T): T => {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch (e) {
+    console.error('safeJsonParse failed for value:', value, e);
+    return fallback;
+  }
+};
