@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card, Button } from '../../components/ui/Common';
 import { useAuth } from '../../hooks/useAuth';
 import { safeFetch, downloadFile } from '../../lib/fetchUtils';
+import { safeJsonParse } from '../../lib/storage';
 import { toast } from 'sonner';
 import { 
   ArrowLeft, CheckCircle2, MessageSquare, AlertCircle, 
@@ -84,7 +85,7 @@ export function ReportDetail() {
   if (loading) return <div className="p-10 animate-pulse">Loading report details...</div>;
   if (!report) return <div className="p-10 text-center">Report not found.</div>;
 
-  const challenges = JSON.parse(report.challengesTags || '[]');
+  const challenges = safeJsonParse<string[]>(report.challengesTags, []);
 
   return (
     <div className="space-y-8 pb-20">
