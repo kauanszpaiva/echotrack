@@ -63,7 +63,11 @@ function authError(res: any, status: number, code: string, message: string) {
   return res.status(status).json({ code, error: message });
 }
 
-function getCookieOptions(req: any) {
+// When `rememberMe` is false we omit maxAge so the browser drops the cookie on
+// close (a session cookie). It is also omitted when clearing the cookie, because
+// res.cookie() derives `expires` from maxAge and would otherwise cancel the
+// expiry-in-the-past that deletes it.
+function getCookieOptions(req: any, { rememberMe = true }: { rememberMe?: boolean } = {}) {
   const sameSite = process.env.COOKIE_SAMESITE === 'none' || process.env.FRONTEND_EMBEDDED === 'true' ? 'none' : 'lax';
   const forwardedProto = String(req.get?.('x-forwarded-proto') || '');
   const isHttps = req.secure || forwardedProto.split(',').some((proto) => proto.trim() === 'https');
@@ -73,11 +77,129 @@ function getCookieOptions(req: any) {
     secure: sameSite === 'none' || process.env.NODE_ENV === 'production' || isHttps,
     sameSite: sameSite as 'lax' | 'none',
     path: "/",
-    maxAge: 24 * 60 * 60 * 1000,
+    ...(rememberMe ? { maxAge: 24 * 60 * 60 * 1000 } : {}),
   };
 }
 
+/**
+ * Issues the application session cookie. The EchoTrack session is always a
+ * server-signed JWT over a row in the `User` table — that is the only user
+ * store `authMiddleware` and `roleMiddleware` know about. Supabase Auth and
+ * Firebase are identity providers that feed into it, never a session of their own.
+ */
+function issueSessionCookie(req: any, res: any, user: { id: string; email: string; role: string; name: string }, rememberMe = true) {
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: user.role, name: user.name },
+    JWT_SECRET,
+    { expiresIn: rememberMe ? '1d' : '12h' }
+  );
+  res.cookie('token', token, getCookieOptions(req, { rememberMe }));
+}
+
 import { verifyIdToken } from './firebase-admin.js';
+
+/**
+ * Maps a verified social identity onto the EchoTrack account with the same email
+ * and issues the application session. Shared by the Supabase and Firebase paths:
+ * social providers only prove ownership of an email, they never create accounts.
+ */
+async function completeProviderLogin(
+  req: any,
+  res: any,
+  identity: { email: string | null; name: string | null; provider: string }
+) {
+  if (!identity.email) {
+    return res.status(400).json({ error: 'Provider did not return an email' });
+  }
+
+  const email = identity.email.toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user) {
+    return res.status(404).json({
+      code: 'NO_ACCOUNT_FOR_EMAIL',
+      error: 'No EchoTrack account found for this email',
+      email,
+      name: identity.name,
+    });
+  }
+
+  if (!user.isActive || user.accountStatus === 'DEACTIVATED') {
+    return res.status(403).json({ code: 'ACCOUNT_INACTIVE', error: 'Account deactivated' });
+  }
+
+  if (user.accountStatus === 'INVITED') {
+    return res.status(403).json({
+      code: 'ACCOUNT_INACTIVE',
+      error: 'Account not yet activated. Use your setup link first.',
+    });
+  }
+
+  issueSessionCookie(req, res, user);
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'LOGIN',
+      entityType: 'User',
+      entityId: user.id,
+      description: `OAuth login via ${identity.provider}`,
+    },
+  });
+
+  return res.json({
+    user: { id: user.id, email: user.email, name: user.name, role: user.role },
+  });
+}
+
+const SUPABASE_AUTH_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const SUPABASE_AUTH_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+
+/**
+ * Exchanges a Supabase Auth access token (obtained by the browser through a
+ * social provider) for an EchoTrack session cookie.
+ *
+ * The token is verified by asking Supabase who it belongs to, rather than by
+ * checking a signature locally: that needs no extra secret and keeps working
+ * whether the project signs with a legacy HS256 secret or asymmetric keys.
+ */
+router.post('/auth/supabase', async (req, res) => {
+  try {
+    const accessToken = requiredString(req.body?.accessToken, 'accessToken', 4096);
+
+    if (!SUPABASE_AUTH_URL || !SUPABASE_AUTH_KEY) {
+      return res.status(503).json({
+        code: 'SUPABASE_NOT_CONFIGURED',
+        error: 'Social sign-in is not configured on the server. Set SUPABASE_URL and SUPABASE_ANON_KEY.',
+      });
+    }
+
+    const response = await fetch(`${SUPABASE_AUTH_URL.replace(/\/$/, '')}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${accessToken}`, apikey: SUPABASE_AUTH_KEY },
+    });
+
+    if (!response.ok) {
+      console.log(`[SUPABASE AUTH FAILED] Supabase rejected the access token (${response.status})`);
+      return res.status(401).json({ code: 'AUTH_INVALID_TOKEN', error: 'Invalid or expired Supabase session' });
+    }
+
+    const supabaseUser: any = await response.json();
+    const metadata = supabaseUser?.user_metadata ?? {};
+
+    return await completeProviderLogin(req, res, {
+      email: supabaseUser?.email ?? null,
+      name: metadata.full_name ?? metadata.name ?? null,
+      provider: supabaseUser?.app_metadata?.provider ?? 'supabase',
+    });
+  } catch (err: any) {
+    console.error('[SUPABASE AUTH ERROR]', err);
+    return res.status(err.status || 500).json({
+      code: err.status ? 'AUTH_VALIDATION_ERROR' : 'AUTH_SERVER_ERROR',
+      error: err.status ? err.message : 'Social sign-in failed',
+    });
+  }
+});
 
 router.post('/auth/oauth', async (req, res) => {
   try {
@@ -91,52 +213,10 @@ router.post('/auth/oauth', async (req, res) => {
       return res.status(401).json({ error: 'Invalid Firebase token' });
     }
 
-    if (!decoded.email) {
-      return res.status(400).json({ error: 'Provider did not return an email' });
-    }
-
-    const email = decoded.email.toLowerCase();
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user) {
-      return res.status(404).json({
-        error: 'No account found for this email',
-        email,
-        name: decoded.name,
-      });
-    }
-
-    if (!user.isActive || user.accountStatus === 'DEACTIVATED') {
-      return res.status(403).json({ error: 'Account deactivated' });
-    }
-
-    if (user.accountStatus === 'INVITED') {
-      return res.status(403).json({
-        error: 'Account not yet activated. Use your setup link first.',
-      });
-    }
-
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, name: user.name },
-      JWT_SECRET,
-      { expiresIn: '1d' }
-    );
-
-    res.cookie('token', token, getCookieOptions(req));
-
-    await prisma.auditLog.create({
-      data: {
-        actorId: user.id,
-        actorRole: user.role,
-        action: 'LOGIN',
-        entityType: 'User',
-        entityId: user.id,
-        description: `OAuth login via ${decoded.provider}`,
-      },
-    });
-
-    res.json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    return await completeProviderLogin(req, res, {
+      email: decoded.email,
+      name: decoded.name,
+      provider: decoded.provider,
     });
   } catch (err) {
     console.error('OAuth error:', err);
@@ -169,9 +249,7 @@ router.post('/setup-account', async (req: any, res: any) => {
         });
 
         // Automatically log them in
-        const jwtToken = jwt.sign({ id: updatedUser.id, email: updatedUser.email, role: updatedUser.role, name: updatedUser.name }, JWT_SECRET, { expiresIn: '1d' });
-        
-        res.cookie('token', jwtToken, getCookieOptions(req));
+        issueSessionCookie(req, res, updatedUser);
 
         await prisma.auditLog.create({
            data: { actorId: updatedUser.id, actorRole: updatedUser.role, action: 'ACTIVATE', entityType: 'User', entityId: updatedUser.id, description: `User setup account via token` }
@@ -273,9 +351,7 @@ router.post('/signup', async (req, res) => {
              return user;
         });
 
-        const jwtToken = jwt.sign({ id: student.id, email: student.email, role: student.role, name: student.name }, JWT_SECRET, { expiresIn: '1d' });
-        
-        res.cookie('token', jwtToken, getCookieOptions(req));
+        issueSessionCookie(req, res, student);
 
         res.json({
           success: true,
@@ -494,6 +570,7 @@ router.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const normalizedEmail = requiredString(email, 'email', 256).toLowerCase();
+    const rememberMe = req.body?.rememberMe !== false;
     if (!password || typeof password !== 'string') {
       return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
     }
@@ -522,10 +599,8 @@ router.post('/auth/login', async (req, res) => {
       return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '1d' });
-    
     console.log(`[LOGIN SUCCESS] User: ${user.name} (${user.role})`);
-    res.cookie('token', token, getCookieOptions(req));
+    issueSessionCookie(req, res, user, rememberMe);
 
     await prisma.auditLog.create({
       data: {
@@ -545,7 +620,7 @@ router.post('/auth/login', async (req, res) => {
 });
 
 router.post('/auth/logout', (req, res) => {
-  res.clearCookie('token', getCookieOptions(req));
+  res.clearCookie('token', getCookieOptions(req, { rememberMe: false }));
   res.json({ success: true });
 });
 

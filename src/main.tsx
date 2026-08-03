@@ -7,16 +7,17 @@ import './index.css';
 
 const root = createRoot(document.getElementById('root')!);
 
-// If the Supabase browser config is missing/invalid, show an actionable screen
-// instead of mounting the app (which would otherwise throw and render blank).
+// A missing/invalid Supabase browser config only disables social sign-in — email
+// and password authentication runs against the EchoTrack API — so the app still
+// mounts. The login screen explains why the social buttons are unavailable.
+if (supabaseConfigError) {
+  console.warn(`[Supabase] Social sign-in disabled: ${supabaseConfigError.message}`);
+}
+
 root.render(
   <StrictMode>
-    {supabaseConfigError ? (
-      <ErrorBoundary initialError={supabaseConfigError} />
-    ) : (
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    )}
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

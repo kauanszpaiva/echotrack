@@ -30,7 +30,7 @@ const AppleIcon = () => (
 );
 
 export function Login() {
-  const { login, loginWithProvider } = useAuth();
+  const { login, loginWithProvider, socialLoginAvailable } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -44,7 +44,7 @@ export function Login() {
     setErrorMsg('');
     try {
       localStorage.setItem('supabase_remember_me', rememberMe ? 'true' : 'false');
-      await login(email, password);
+      await login(email, password, rememberMe);
       navigate('/dashboard-redirect');
     } catch (err: any) {
       setErrorMsg(err.message || 'Invalid email or password.');
@@ -57,15 +57,12 @@ export function Login() {
     setErrorMsg('');
     setLoading(true);
     try {
+      localStorage.setItem('supabase_remember_me', rememberMe ? 'true' : 'false');
+      // Leaves the page for the provider and returns to /dashboard-redirect,
+      // where the Supabase session is exchanged for an EchoTrack session.
       await loginWithProvider(provider);
-      navigate('/dashboard-redirect');
     } catch (err: any) {
-      if (err.status === 404 && err.email) {
-        navigate(`/signup?email=${encodeURIComponent(err.email)}&name=${encodeURIComponent(err.name || '')}`);
-        return;
-      }
       setErrorMsg(err.message || `${provider} sign-in failed.`);
-    } finally {
       setLoading(false);
     }
   };
@@ -122,22 +119,28 @@ export function Login() {
             </div>
 
             <div className="space-y-3">
-              <button type="button" disabled={loading} onClick={() => handleProvider('google')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
+              <button type="button" disabled={loading || !socialLoginAvailable} onClick={() => handleProvider('google')}
+                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-white">
                 <div className="absolute left-4"><GoogleIcon /></div>
                 <span className="font-semibold text-sm text-gray-700">Continue with Google</span>
               </button>
-              <button type="button" disabled={loading} onClick={() => handleProvider('microsoft')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
+              <button type="button" disabled={loading || !socialLoginAvailable} onClick={() => handleProvider('microsoft')}
+                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-white">
                 <div className="absolute left-4"><MicrosoftIcon /></div>
                 <span className="font-semibold text-sm text-gray-700">Continue with Microsoft</span>
               </button>
-              <button type="button" disabled={loading} onClick={() => handleProvider('apple')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
+              <button type="button" disabled={loading || !socialLoginAvailable} onClick={() => handleProvider('apple')}
+                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-white">
                 <div className="absolute left-4"><AppleIcon /></div>
                 <span className="font-semibold text-sm text-gray-700">Continue with Apple</span>
               </button>
             </div>
+
+            {!socialLoginAvailable && (
+              <p className="mt-4 text-center text-xs text-gray-400">
+                Social sign-in is unavailable until the Supabase keys are configured. Email and password still work.
+              </p>
+            )}
           </Card>
 
           <p className="mt-6 text-center text-sm text-gray-600">

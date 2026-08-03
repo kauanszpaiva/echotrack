@@ -15,11 +15,17 @@ Supports students submitting weekly reports, and Admin, Program Managers, Coache
    `npm install`
 4. Run migrations against your database:
    `npm run db:deploy`
-   *(Optional)* Seed a local admin:
-   `DEV_ADMIN_EMAILS=you@example.com DEV_ADMIN_PASSWORD=strong-pass NODE_ENV=development npm run db:seed`
+5. Create the first admin (works in any environment, idempotent):
+   `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=a-strong-password npm run db:bootstrap-admin`
+
+## Authentication
+Accounts live in the `users` table and sign-in issues a server-signed session
+cookie that every `/api/*` route checks. Supabase Auth is used only to broker
+Google / Microsoft / Apple identities into that session, so a user created in the
+Supabase dashboard cannot sign in — see `SUPABASE_SETUP.md`.
 
 ## Deploy (Vercel + Supabase)
-See **`SUPABASE_SETUP.md`** for the full step-by-step (connection strings, env vars, Firebase social login).
+See **`SUPABASE_SETUP.md`** for the full step-by-step (connection strings, env vars, social login).
 
 ## Running Locally
 Start both the Vite frontend and Express backend:
