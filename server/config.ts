@@ -1,8 +1,4 @@
-const _jwtSecret = process.env.JWT_SECRET;
-if (!_jwtSecret) {
-  throw new Error("Missing JWT_SECRET environment variable. Please configure it.");
-}
-if (_jwtSecret === "REPLACE_WITH_RANDOM_HEX_64" || _jwtSecret.length < 32) {
-  throw new Error("JWT_SECRET must be a strong secret of at least 32 characters.");
-}
-export const JWT_SECRET: string = _jwtSecret;
+// DEPRECATED: authentication is unified on Supabase Auth (see server/auth.ts).
+// JWT_SECRET is no longer used to authenticate requests. Kept only so any
+// lingering import resolves without crashing the server at startup.
+export const JWT_SECRET: string = process.env.JWT_SECRET || "deprecated-unused-secret";

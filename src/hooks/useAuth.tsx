@@ -21,11 +21,14 @@ const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 function toAppUser(user: SupabaseUser): User {
   const metadata = user.user_metadata ?? {};
+  const appMetadata = (user.app_metadata ?? {}) as { role?: string };
   return {
     id: user.id,
     email: user.email ?? '',
     name: metadata.full_name ?? metadata.name ?? user.email?.split('@')[0] ?? 'User',
-    role: metadata.role ?? 'STUDENT',
+    // Role is authoritative in app_metadata (admin-only, not user-editable).
+    // Fall back to user_metadata only for legacy accounts, then STUDENT.
+    role: appMetadata.role ?? metadata.role ?? 'STUDENT',
   };
 }
 

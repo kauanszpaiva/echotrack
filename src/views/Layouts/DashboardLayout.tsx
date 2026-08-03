@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { 
+import {
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
-  GraduationCap, AlertTriangle, ShieldAlert, Award
+  GraduationCap, AlertTriangle, ShieldAlert, Award, Zap
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
 import { ROLE_BADGE } from '../../types';
@@ -26,46 +26,57 @@ export function DashboardLayout() {
   if (!user) return null;
 
   const getSidebarItems = () => {
+    const adminItems = [
+      { label: 'Dashboard',        href: '/admin',                    icon: LayoutDashboard },
+      { label: 'Program Managers', href: '/admin/staff',              icon: Building2 },
+      { label: 'All Users',        href: '/admin/users',              icon: UserCog },
+      { label: 'Pathways',         href: '/admin/pathways',           icon: Layers },
+      { label: 'Classes',          href: '/admin/classes',            icon: BookOpen },
+      { label: 'Communities',      href: '/admin/communities',        icon: Users },
+      { label: 'Report Cycles',    href: '/admin/cycles',             icon: Calendar },
+      { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
+      { label: 'Conduct Points',   href: '/admin/conduct',            icon: ShieldAlert },
+      { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
+      { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 },
+      { label: 'Contract Points',  href: '/admin/contract-points',    icon: Award },
+      { label: 'Audit Logs',       href: '/admin/audit',              icon: ClipboardList },
+      { label: 'Settings',         href: '/admin/settings',           icon: Settings },
+    ];
+    const pmItems = [
+      { label: 'Dashboard',        href: '/pm',                       icon: LayoutDashboard },
+      { label: 'Users',            href: '/admin/users',              icon: UserCog },
+      { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
+      { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
+      { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 }
+    ];
+    const instructorItems = [
+      { label: 'Dashboard',      href: '/instructor',          icon: LayoutDashboard },
+      { label: 'Conduct Points', href: '/instructor/conduct',  icon: ShieldAlert }
+    ];
+    const coachItems = [
+      { label: 'Dashboard',    href: '/coach',          icon: LayoutDashboard }
+    ];
+    const studentItems = [
+      { label: 'Dashboard',      href: '/student',         icon: LayoutDashboard },
+      { label: 'Weekly Report',  href: '/student/report',  icon: FileText }
+    ];
+
     switch (user.role) {
+      case 'DEV':
+        // DEV = full admin access + a dedicated developer area.
+        return [{ label: 'Dev Panel', href: '/dev', icon: Zap }, ...adminItems];
       case 'ADMIN':
-        return [
-          { label: 'Dashboard',        href: '/admin',                    icon: LayoutDashboard },
-          { label: 'Program Managers', href: '/admin/staff',              icon: Building2 },
-          { label: 'All Users',        href: '/admin/users',              icon: UserCog },
-          { label: 'Pathways',         href: '/admin/pathways',           icon: Layers },
-          { label: 'Classes',          href: '/admin/classes',            icon: BookOpen },
-          { label: 'Communities',      href: '/admin/communities',        icon: Users },
-          { label: 'Report Cycles',    href: '/admin/cycles',             icon: Calendar },
-          { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
-          { label: 'Conduct Points',   href: '/admin/conduct',            icon: ShieldAlert },
-          { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
-          { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 },
-          { label: 'Contract Points',  href: '/admin/contract-points',    icon: Award },
-          { label: 'Audit Logs',       href: '/admin/audit',              icon: ClipboardList },
-          { label: 'Settings',         href: '/admin/settings',           icon: Settings },
-        ];
+        return adminItems;
       case 'PROGRAM_MANAGER':
-        return [
-          { label: 'Dashboard',        href: '/pm',                       icon: LayoutDashboard },
-          { label: 'Users',            href: '/admin/users',              icon: UserCog },
-          { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
-          { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
-          { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 }
-        ];
+        return pmItems;
       case 'INSTRUCTOR':
-        return [
-          { label: 'Dashboard',      href: '/instructor',          icon: LayoutDashboard },
-          { label: 'Conduct Points', href: '/instructor/conduct',  icon: ShieldAlert }
-        ];
+        return instructorItems;
       case 'COACH':
-        return [
-          { label: 'Dashboard',    href: '/coach',          icon: LayoutDashboard }
-        ];
+      case 'PSM':
+        return coachItems;
       case 'STUDENT':
-        return [
-          { label: 'Dashboard',      href: '/student',         icon: LayoutDashboard },
-          { label: 'Weekly Report',  href: '/student/report',  icon: FileText }
-        ];
+      case 'INTERN':
+        return studentItems;
       default: return [];
     }
   };
