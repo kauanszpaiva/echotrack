@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
+import { AuthenticateWithRedirectCallback } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 
 // Views
@@ -69,6 +70,10 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/setup-account" element={<SetupAccount />} />
+        <Route
+          path="/sso-callback"
+          element={<AuthenticateWithRedirectCallback signInFallbackRedirectUrl="/dashboard-redirect" signUpFallbackRedirectUrl="/dashboard-redirect" />}
+        />
         <Route path="/dashboard-redirect" element={<DashboardRedirect />} />
         
         <Route element={<DashboardLayout />}>

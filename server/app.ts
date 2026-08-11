@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { clerkMiddleware } from "@clerk/express";
 import apiRoutes from "./routes.js";
 
 const configuredOrigins = new Set(
@@ -49,6 +50,11 @@ app.use(
 );
 app.use(express.json({ limit: "100kb" }));
 app.use(cookieParser());
+
+// Attach Clerk auth context to every request (reads CLERK_SECRET_KEY /
+// CLERK_PUBLISHABLE_KEY from env). Enforcement happens per-route in
+// authMiddleware via getAuth(req).
+app.use(clerkMiddleware());
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });

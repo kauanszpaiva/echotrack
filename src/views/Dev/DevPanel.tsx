@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Button } from '../../components/ui/Common';
 import { useAuth } from '../../hooks/useAuth';
-import { supabase } from '../../lib/supabaseClient';
 import { safeFetch } from '../../lib/fetchUtils';
 import { ROLE_LABELS } from '../../../shared/roles';
 
@@ -30,10 +29,10 @@ export function DevPanel() {
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      const t = data.session?.access_token ?? '';
+    (async () => {
+      const t = (await (window as any).Clerk?.session?.getToken()) ?? '';
       setTokenPreview(t ? `${t.slice(0, 12)}…${t.slice(-6)}` : '(no active session token)');
-    });
+    })();
   }, []);
 
   const runHealthCheck = async () => {

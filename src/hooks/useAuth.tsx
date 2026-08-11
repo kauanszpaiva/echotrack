@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabaseClient';
+import { createContext, useContext } from 'react';
+import { useUser, useClerk, useSignIn } from '@clerk/clerk-react';
+
+type ClerkUserResource = NonNullable<ReturnType<typeof useUser>['user']>;
 
 interface User {
   id: string;
@@ -19,66 +20,52 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
-function toAppUser(user: SupabaseUser): User {
-  const metadata = user.user_metadata ?? {};
-  const appMetadata = (user.app_metadata ?? {}) as { role?: string };
+function toAppUser(user: ClerkUserResource): User {
+  const role = (user.publicMetadata as { role?: string })?.role;
+  const email = user.primaryEmailAddress?.emailAddress ?? '';
   return {
     id: user.id,
-    email: user.email ?? '',
-    name: metadata.full_name ?? metadata.name ?? user.email?.split('@')[0] ?? 'User',
-    // Role is authoritative in app_metadata (admin-only, not user-editable).
-    // Fall back to user_metadata only for legacy accounts, then STUDENT.
-    role: appMetadata.role ?? metadata.role ?? 'STUDENT',
+    email,
+    name: user.fullName || user.firstName || email.split('@')[0] || 'User',
+    // Role is authoritative in publicMetadata (admin-only, not user-editable).
+    role: role ?? 'STUDENT',
   };
 }
 
-function toLoginError(error: { message?: string }) {
-  const message = error.message?.toLowerCase() ?? '';
-  if (message.includes('email not confirmed')) {
-    return new Error('Please verify your email address before signing in.');
-  }
-  if (message.includes('invalid login credentials')) {
+function toLoginError(error: any): Error {
+  const clerkError = error?.errors?.[0];
+  const code = clerkError?.code ?? '';
+  const message = (clerkError?.longMessage || clerkError?.message || error?.message || '').toLowerCase();
+
+  if (code === 'form_identifier_not_found' || message.includes('couldn')) {
     return new Error('Invalid email or password. Please check your details and try again.');
   }
-  return new Error(error.message || 'Unable to sign in. Please try again.');
+  if (code === 'form_password_incorrect' || message.includes('password is incorrect')) {
+    return new Error('Invalid email or password. Please check your details and try again.');
+  }
+  if (message.includes('verif')) {
+    return new Error('Please verify your email address before signing in.');
+  }
+  return new Error(clerkError?.longMessage || clerkError?.message || error?.message || 'Unable to sign in. Please try again.');
 }
 
 export function AuthProvider({ children }: { children: any }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { isLoaded, isSignedIn, user: clerkUser } = useUser();
+  const { signOut } = useClerk();
+  const { isLoaded: signInLoaded, signIn, setActive } = useSignIn();
 
-  useEffect(() => {
-    let mounted = true;
-
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return;
-      if (error) console.error('Session check failed:', error.message);
-      setUser(data.session?.user ? toAppUser(data.session.user) : null);
-      setLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (mounted) {
-        setUser(session?.user ? toAppUser(session.user) : null);
-        setLoading(false);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
+  const user = isSignedIn && clerkUser ? toAppUser(clerkUser) : null;
+  const loading = !isLoaded;
 
   const login = async (email: string, password: string) => {
+    if (!signInLoaded || !signIn) throw new Error('Authentication is still loading. Please try again.');
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (error) throw error;
-      if (!data.user) throw new Error('Supabase did not return a user session.');
-      setUser(toAppUser(data.user));
+      const result = await signIn.create({ identifier: email.trim(), password });
+      if (result.status === 'complete') {
+        await setActive({ session: result.createdSessionId });
+        return;
+      }
+      throw new Error('Additional verification is required to sign in.');
     } catch (e: any) {
       console.error('Login error:', e);
       throw toLoginError(e);
@@ -86,12 +73,15 @@ export function AuthProvider({ children }: { children: any }) {
   };
 
   const loginWithProvider = async (provider: 'google' | 'microsoft' | 'apple') => {
+    if (!signInLoaded || !signIn) throw new Error('Authentication is still loading. Please try again.');
+    const strategy =
+      provider === 'microsoft' ? 'oauth_microsoft' : provider === 'apple' ? 'oauth_apple' : 'oauth_google';
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: provider === 'microsoft' ? 'azure' : provider,
-        options: { redirectTo: `${window.location.origin}/dashboard-redirect` },
+      await signIn.authenticateWithRedirect({
+        strategy,
+        redirectUrl: '/sso-callback',
+        redirectUrlComplete: '/dashboard-redirect',
       });
-      if (error) throw error;
     } catch (error) {
       console.error('OAuth login error:', error);
       throw error;
@@ -99,9 +89,7 @@ export function AuthProvider({ children }: { children: any }) {
   };
 
   const logout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) console.error('Logout error:', error.message);
-    setUser(null);
+    await signOut();
   };
 
   return (

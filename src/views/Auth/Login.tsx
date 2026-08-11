@@ -43,7 +43,6 @@ export function Login() {
     setLoading(true);
     setErrorMsg('');
     try {
-      localStorage.setItem('supabase_remember_me', rememberMe ? 'true' : 'false');
       await login(email, password);
       navigate('/dashboard-redirect');
     } catch (err: any) {

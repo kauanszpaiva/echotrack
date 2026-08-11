@@ -13,7 +13,7 @@ interface State {
 /**
  * Root error boundary. Renders a readable message instead of a blank white page
  * for two cases: (1) errors thrown while React renders its children, and
- * (2) an `initialError` passed in (e.g. a missing Supabase config detected at
+ * (2) an `initialError` passed in (e.g. a missing Clerk config detected at
  * startup, which throws too early for a boundary to catch on its own).
  */
 export class ErrorBoundary extends Component<Props, State> {
@@ -58,13 +58,9 @@ export class ErrorBoundary extends Component<Props, State> {
               <p className="text-gray-500">
                 In Vercel, set{' '}
                 <code className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">
-                  VITE_SUPABASE_URL
+                  VITE_CLERK_PUBLISHABLE_KEY
                 </code>{' '}
-                and{' '}
-                <code className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">
-                  VITE_SUPABASE_ANON_KEY
-                </code>{' '}
-                (Production &amp; Preview), then redeploy — these values are baked
+                (Production &amp; Preview), then redeploy — this value is baked
                 into the build, so a fresh deploy is required.
               </p>
             </div>

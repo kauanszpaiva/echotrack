@@ -1,10 +1,7 @@
-import { supabase } from './supabaseClient';
-
-/** Attach the current Supabase access token so the API can authenticate the request. */
+/** Attach the current Clerk session token so the API can authenticate the request. */
 async function withAuthHeaders(init: HeadersInit = {}): Promise<Headers> {
   const headers = new Headers(init);
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  const token = await (window as any).Clerk?.session?.getToken();
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }

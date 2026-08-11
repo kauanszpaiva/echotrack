@@ -6,7 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
-server/firebase-service-account.json
 prisma/dev.db
 
 /src/generated/prisma

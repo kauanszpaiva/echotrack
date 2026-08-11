@@ -3,12 +3,13 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Card, Button, Input, Select } from '../../components/ui/Common';
 import { safeFetch } from '../../lib/fetchUtils';
-import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../hooks/useAuth';
 import { Logo } from '../../components/Logo';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function SignUp() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -71,12 +72,10 @@ export function SignUp() {
         body: JSON.stringify(formData)
       });
 
-      // The account now exists in Supabase Auth — establish the session.
-      const { error } = await supabase.auth.signInWithPassword({
-        email: formData.email.trim(),
-        password: formData.password,
-      });
-      if (error) {
+      // The account now exists in Clerk — establish the session.
+      try {
+        await login(formData.email.trim(), formData.password);
+      } catch {
         toast.success('Registration successful! Please sign in.');
         setTimeout(() => { window.location.href = '/login'; }, 1000);
         return;
