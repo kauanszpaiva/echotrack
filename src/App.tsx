@@ -58,6 +58,8 @@ import { CoachDashboard } from './views/Coach/CoachDashboard';
 import { InstructorDashboard } from './views/Instructor/InstructorDashboard';
 import { ReportDetail } from './views/Admin/ReportDetail';
 import { ConductTracker } from './views/Conduct/ConductTracker';
+import { MemberProfile } from './views/Profile/MemberProfile';
+import { MemberDirectory } from './views/Profile/MemberDirectory';
 
 export default function App() {
   return (
@@ -72,6 +74,11 @@ export default function App() {
         <Route path="/dashboard-redirect" element={<DashboardRedirect />} />
         
         <Route element={<DashboardLayout />}>
+          {/* Member profiles — available to every signed-in role. */}
+          <Route path="/profile" element={<MemberProfile />} />
+          <Route path="/profile/:userId" element={<MemberProfile />} />
+          <Route path="/directory" element={<MemberDirectory />} />
+
           <Route path="/dev" element={<DevPanel />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/staff" element={<ProgramManagers />} />

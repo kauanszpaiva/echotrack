@@ -31,6 +31,7 @@ model User {
   instructorPathway   Pathway? @relation("InstructorPathway", fields: [instructorPathwayId], references: [id], onDelete: SetNull)
 
   studentProfile           StudentProfile?
+  memberProfile            MemberProfile?
   classesTaught            ClassModel[]       @relation("InstructorClasses")
   assignedStudents         StudentProfile[]   @relation("CoachStudents")
   pmStudents               StudentProfile[]   @relation("PMStudents")
@@ -138,6 +139,109 @@ model StudentProfile {
   classEnrollments StudentClassEnrollment[]
 
   @@map("student_profiles")
+}
+
+/// A LinkedIn-style professional profile owned by one member.
+///
+/// Membership scope: a member's cohort is their `StudentProfile.communityId`.
+/// The profile itself is keyed on the user (so staff can have one too), and the
+/// member directory is filtered by community so people browse their own cohort.
+/// Community is never copied onto this row — it is always read through
+/// StudentProfile so moving a student between cohorts needs no backfill.
+model MemberProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  headline    String?
+  about       String?
+  location    String?
+  linkedinUrl String?  @map("linkedin_url")
+  websiteUrl  String?  @map("website_url")
+  /// Owner-controlled. Unpublished profiles are visible only to the owner and admins.
+  isPublished Boolean  @default(false) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workExperiences WorkExperience[]
+  education       EducationEntry[]
+  certifications  Certification[]
+  skills          ProfileSkill[]
+
+  @@map("member_profiles")
+}
+
+model WorkExperience {
+  id             String    @id @default(cuid())
+  profileId      String    @map("profile_id")
+  title          String
+  company        String
+  /// FULL_TIME | PART_TIME | INTERNSHIP | APPRENTICESHIP | CONTRACT | VOLUNTEER | SELF_EMPLOYED
+  employmentType String?   @map("employment_type")
+  location       String?
+  /// ON_SITE | HYBRID | REMOTE
+  locationType   String?   @map("location_type")
+  startDate      DateTime  @map("start_date")
+  /// Null while `isCurrent` is true.
+  endDate        DateTime? @map("end_date")
+  isCurrent      Boolean   @default(false) @map("is_current")
+  description    String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, startDate])
+  @@map("work_experiences")
+}
+
+model EducationEntry {
+  id           String    @id @default(cuid())
+  profileId    String    @map("profile_id")
+  school       String
+  degree       String?
+  fieldOfStudy String?   @map("field_of_study")
+  startDate    DateTime? @map("start_date")
+  endDate      DateTime? @map("end_date")
+  isCurrent    Boolean   @default(false) @map("is_current")
+  description  String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, startDate])
+  @@map("education_entries")
+}
+
+model Certification {
+  id            String    @id @default(cuid())
+  profileId     String    @map("profile_id")
+  name          String
+  issuer        String?
+  issueDate     DateTime? @map("issue_date")
+  expiryDate    DateTime? @map("expiry_date")
+  credentialId  String?   @map("credential_id")
+  credentialUrl String?   @map("credential_url")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, issueDate])
+  @@map("certifications")
+}
+
+model ProfileSkill {
+  id        String   @id @default(cuid())
+  profileId String   @map("profile_id")
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, name])
+  @@map("profile_skills")
 }
 
 model StudentClassEnrollment {

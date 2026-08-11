@@ -4,7 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
-  GraduationCap, AlertTriangle, ShieldAlert, Award, Zap
+  GraduationCap, AlertTriangle, ShieldAlert, Award, Zap, UserRound, Contact
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
 import { ROLE_BADGE } from '../../types';
@@ -61,24 +61,34 @@ export function DashboardLayout() {
       { label: 'Weekly Report',  href: '/student/report',  icon: FileText }
     ];
 
-    switch (user.role) {
-      case 'DEV':
-        // DEV = full admin access + a dedicated developer area.
-        return [{ label: 'Dev Panel', href: '/dev', icon: Zap }, ...adminItems];
-      case 'ADMIN':
-        return adminItems;
-      case 'PROGRAM_MANAGER':
-        return pmItems;
-      case 'INSTRUCTOR':
-        return instructorItems;
-      case 'COACH':
-      case 'PSM':
-        return coachItems;
-      case 'STUDENT':
-      case 'INTERN':
-        return studentItems;
-      default: return [];
-    }
+    // Every member has a profile and can browse their cohort directory.
+    const profileItems = [
+      { label: 'My Profile',       href: '/profile',    icon: UserRound },
+      { label: 'Member Directory', href: '/directory',  icon: Contact },
+    ];
+
+    const roleItems = (() => {
+      switch (user.role) {
+        case 'DEV':
+          // DEV = full admin access + a dedicated developer area.
+          return [{ label: 'Dev Panel', href: '/dev', icon: Zap }, ...adminItems];
+        case 'ADMIN':
+          return adminItems;
+        case 'PROGRAM_MANAGER':
+          return pmItems;
+        case 'INSTRUCTOR':
+          return instructorItems;
+        case 'COACH':
+        case 'PSM':
+          return coachItems;
+        case 'STUDENT':
+        case 'INTERN':
+          return studentItems;
+        default: return [];
+      }
+    })();
+
+    return [...roleItems, ...profileItems];
   };
 
   const navItems = getSidebarItems();

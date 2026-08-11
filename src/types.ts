@@ -50,3 +50,95 @@ export interface ConductEntry {
   author: { id: string; name: string; role: UserRole };
   reviewer?: { id: string; name: string } | null;
 }
+
+/* ─────────────────────────── member profiles ─────────────────────────── */
+
+export type EmploymentType =
+  | 'FULL_TIME' | 'PART_TIME' | 'INTERNSHIP' | 'APPRENTICESHIP'
+  | 'CONTRACT' | 'FREELANCE' | 'VOLUNTEER' | 'SELF_EMPLOYED';
+
+export type LocationType = 'ON_SITE' | 'HYBRID' | 'REMOTE';
+
+export const EMPLOYMENT_TYPE_OPTIONS: { value: EmploymentType; label: string }[] = [
+  { value: 'FULL_TIME',      label: 'Full-time' },
+  { value: 'PART_TIME',      label: 'Part-time' },
+  { value: 'INTERNSHIP',     label: 'Internship' },
+  { value: 'APPRENTICESHIP', label: 'Apprenticeship' },
+  { value: 'CONTRACT',       label: 'Contract' },
+  { value: 'FREELANCE',      label: 'Freelance' },
+  { value: 'VOLUNTEER',      label: 'Volunteer' },
+  { value: 'SELF_EMPLOYED',  label: 'Self-employed' },
+];
+
+export const LOCATION_TYPE_OPTIONS: { value: LocationType; label: string }[] = [
+  { value: 'ON_SITE', label: 'On-site' },
+  { value: 'HYBRID',  label: 'Hybrid' },
+  { value: 'REMOTE',  label: 'Remote' },
+];
+
+export interface WorkExperience {
+  id: string;
+  title: string;
+  company: string;
+  employmentType: EmploymentType | null;
+  location: string | null;
+  locationType: LocationType | null;
+  startDate: string;
+  endDate: string | null;
+  isCurrent: boolean;
+  description: string | null;
+}
+
+export interface EducationEntry {
+  id: string;
+  school: string;
+  degree: string | null;
+  fieldOfStudy: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  isCurrent: boolean;
+  description: string | null;
+}
+
+export interface Certification {
+  id: string;
+  name: string;
+  issuer: string | null;
+  issueDate: string | null;
+  expiryDate: string | null;
+  credentialId: string | null;
+  credentialUrl: string | null;
+}
+
+export interface MemberProfile {
+  id: string;
+  userId: string;
+  headline: string | null;
+  about: string | null;
+  location: string | null;
+  linkedinUrl: string | null;
+  websiteUrl: string | null;
+  isPublished: boolean;
+  workExperiences: WorkExperience[];
+  education: EducationEntry[];
+  certifications: Certification[];
+  skills: { id: string; name: string }[];
+}
+
+/** The account a profile belongs to, plus its cohort context. */
+export interface ProfileMember {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  avatarUrl: string | null;
+  community: { id: string; name: string } | null;
+  pathway: { id: string; name: string } | null;
+}
+
+export interface DirectoryMember extends ProfileMember {
+  headline: string | null;
+  location: string | null;
+  currentRole: { title: string; company: string } | null;
+  skills: string[];
+}

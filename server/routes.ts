@@ -1788,4 +1788,8 @@ router.patch('/conduct/:id', authMiddleware, roleMiddleware(['ADMIN']), async (r
     } catch (e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Unable to review conduct entry' }); }
 });
 
+// Member profiles (LinkedIn-style work experience, education, skills, resume).
+import profileRoutes from './profileRoutes.js';
+router.use(profileRoutes);
+
 export default router;
