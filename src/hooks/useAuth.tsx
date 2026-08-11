@@ -32,6 +32,10 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   loginWithProvider: (provider: OAuthProvider) => Promise<void>;
+  /** Emails a verification code so the user can set (or reset) a password. */
+  requestPasswordReset: (email: string) => Promise<void>;
+  /** Completes the reset with the emailed code and signs the user in. */
+  resetPassword: (code: string, newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -63,6 +67,18 @@ function toLoginError(error: any): Error {
   if (code === 'form_password_incorrect' || message.includes('password is incorrect')) {
     return new Error('Invalid email or password. Please check your details and try again.');
   }
+  // The account exists but has no password credential — typically because it was
+  // created through a social login. Point at the "set a password" flow instead
+  // of repeating "wrong password", which would be misleading.
+  if (
+    code === 'strategy_for_user_invalid' ||
+    message.includes('does not support') ||
+    message.includes('no password')
+  ) {
+    return new Error(
+      'This account signs in with Google and has no password yet. Use "Forgot / set password" below to create one.',
+    );
+  }
   if (message.includes('verif')) {
     return new Error('Please verify your email address before signing in.');
   }
@@ -85,9 +101,63 @@ export function AuthProvider({ children }: { children: any }) {
         await setActive({ session: result.createdSessionId });
         return;
       }
+      if (result.status === 'needs_second_factor') {
+        throw new Error('Two-factor authentication is required for this account.');
+      }
       throw new Error('Additional verification is required to sign in.');
     } catch (e: any) {
       console.error('Login error:', e);
+      throw toLoginError(e);
+    }
+  };
+
+  /**
+   * Sends a verification code to the email address. Clerk allows an account to
+   * gain a password this way, so an account created through Google can start
+   * signing in with email + password.
+   */
+  const requestPasswordReset = async (email: string) => {
+    if (!signInLoaded || !signIn) throw new Error('Authentication is still loading. Please try again.');
+    try {
+      await signIn.create({ strategy: 'reset_password_email_code', identifier: email.trim() });
+    } catch (e: any) {
+      console.error('Password reset request error:', e);
+      const code = e?.errors?.[0]?.code ?? '';
+      if (code === 'form_identifier_not_found') {
+        // Don't confirm whether the address exists.
+        return;
+      }
+      throw toLoginError(e);
+    }
+  };
+
+  const resetPassword = async (code: string, newPassword: string) => {
+    if (!signInLoaded || !signIn) throw new Error('Authentication is still loading. Please try again.');
+    try {
+      const result = await signIn.attemptFirstFactor({
+        strategy: 'reset_password_email_code',
+        code: code.trim(),
+        password: newPassword,
+      });
+      if (result.status === 'complete') {
+        await setActive({ session: result.createdSessionId });
+        return;
+      }
+      if (result.status === 'needs_second_factor') {
+        throw new Error('Two-factor authentication is required to finish signing in.');
+      }
+      throw new Error('Could not finish the password reset. Please start again.');
+    } catch (e: any) {
+      console.error('Password reset error:', e);
+      const clerkCode = e?.errors?.[0]?.code ?? '';
+      if (clerkCode === 'form_code_incorrect' || clerkCode === 'verification_failed') {
+        throw new Error('That code is not valid. Check the email and try again.');
+      }
+      if (clerkCode === 'form_password_pwned' || clerkCode === 'form_password_length_too_short') {
+        throw new Error(
+          e?.errors?.[0]?.longMessage || 'Choose a stronger password (at least 8 characters).',
+        );
+      }
       throw toLoginError(e);
     }
   };
@@ -119,7 +189,9 @@ export function AuthProvider({ children }: { children: any }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithProvider, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, loginWithProvider, requestPasswordReset, resetPassword, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );

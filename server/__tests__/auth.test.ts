@@ -294,7 +294,42 @@ describe('user mirror', () => {
   });
 });
 
-// ── 6. Legacy auth surface is gone ──────────────────────────────────────────
+// ── 6. The API always answers JSON ──────────────────────────────────────────
+// "Server returned non-JSON response (500)" in the UI means the response never
+// came from Express. /admin/analytics used to swallow its error silently, so a
+// failure left no trace in the logs either.
+
+describe('admin analytics', () => {
+  it('answers an admin with JSON', async () => {
+    const user = signIn('ADMIN');
+    seed([{ id: 'u1', clerkUserId: user.id, email: 'person@kspdominion.group', role: 'ADMIN' }]);
+    const res = await request(app).get('/api/admin/analytics');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    expect(res.body).toHaveProperty('totalStudents');
+  });
+
+  it('still answers JSON — not an HTML error page — when a query fails', async () => {
+    const user = signIn('ADMIN');
+    seed([{ id: 'u1', clerkUserId: user.id, email: 'person@kspdominion.group', role: 'ADMIN' }]);
+    prismaMock.alert.count.mockRejectedValueOnce(new Error('connection terminated 10.0.0.1:5432'));
+
+    const res = await request(app).get('/api/admin/analytics');
+
+    expect(res.status).toBe(500);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    expect(JSON.stringify(res.body)).not.toMatch(/5432|connection terminated/);
+  });
+
+  it('refuses a student', async () => {
+    const user = signIn('STUDENT');
+    seed([{ id: 'u1', clerkUserId: user.id, email: 'person@kspdominion.group', role: 'STUDENT' }]);
+    const res = await request(app).get('/api/admin/analytics');
+    expect(res.status).toBe(403);
+  });
+});
+
+// ── 7. Legacy auth surface is gone ──────────────────────────────────────────
 
 describe('legacy authentication surface', () => {
   it('no longer exposes the password login endpoint', async () => {

@@ -101,10 +101,31 @@ export const prismaMock = {
     }),
     count: vi.fn(async () => store.users.length),
   },
-  auditLog: { create: vi.fn(async () => ({})) },
+  auditLog: {
+    create: vi.fn(async () => ({})),
+    findMany: vi.fn(async () => { guard(); return []; }),
+  },
   conductEntry: { findMany: vi.fn(async () => []) },
-  classModel: { findMany: vi.fn(async () => []) },
+  classModel: {
+    findMany: vi.fn(async () => { guard(); return []; }),
+    count: vi.fn(async () => { guard(); return 0; }),
+  },
   studentProfile: { findUnique: vi.fn(async () => null) },
+  reportCycle: {
+    findFirst: vi.fn(async () => { guard(); return null; }),
+    count: vi.fn(async () => { guard(); return 0; }),
+  },
+  weeklyReport: {
+    findMany: vi.fn(async () => { guard(); return []; }),
+    count: vi.fn(async () => { guard(); return 0; }),
+    groupBy: vi.fn(async () => { guard(); return []; }),
+  },
+  alert: {
+    count: vi.fn(async () => { guard(); return 0; }),
+    groupBy: vi.fn(async () => { guard(); return []; }),
+  },
+  classRating: { findMany: vi.fn(async () => { guard(); return []; }) },
+  pathway: { count: vi.fn(async () => { guard(); return 0; }) },
   appSettings: {
     findUnique: vi.fn(async () => ({ id: 'singleton' })),
     create: vi.fn(async () => ({ id: 'singleton' })),

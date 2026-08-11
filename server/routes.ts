@@ -681,7 +681,7 @@ router.delete('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async 
     }
 });
 
-router.get('/admin/analytics', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any) => {
+router.get('/admin/analytics', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any, next: any) => {
     try {
         if (req.user.role === 'PROGRAM_MANAGER') {
             const pmId = req.user.id;
@@ -716,50 +716,69 @@ router.get('/admin/analytics', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM
             });
         }
 
-        const totalStudents = await prisma.user.count({ where: { role: { in: STUDENT_LEVEL }, isActive: true } });
-        const totalActiveUsers = await prisma.user.count({ where: { isActive: true } });
-        
-        let cycle = await prisma.reportCycle.findFirst({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' } });
-        let submissionRate = 0;
-        let reviewedRate = 0;
-        let studentsNeedingSupport = 0;
-
-        if (cycle) {
-            const submittedCount = await prisma.weeklyReport.count({ where: { cycleId: cycle.id, status: 'SUBMITTED' } });
-            const reviewedCount = await prisma.weeklyReport.count({ where: { cycleId: cycle.id, status: 'REVIEWED' } });
-            if (totalStudents > 0) submissionRate = Math.round((submittedCount / totalStudents) * 100);
-            if (submittedCount > 0) reviewedRate = Math.round((reviewedCount / submittedCount) * 100);
-        }
-
-        const openCyclesPastDue = await prisma.reportCycle.count({ where: { status: 'OPEN', endDate: { lt: new Date() } } });
-        const overdueReports = openCyclesPastDue * totalStudents;
-
-        const needsSupportReports = await prisma.weeklyReport.findMany({ where: { needsSupport: true }, select: { studentId: true } });
-        studentsNeedingSupport = new Set(needsSupportReports.map(r => r.studentId)).size;
-
-        const activeAlertsCount = await prisma.alert.count({ where: { resolved: false } });
-
-        const typeGroups = await prisma.alert.groupBy({ by: ['type'], _count: { id: true } });
-        const alertDistribution = typeGroups.map(g => ({ type: g.type, count: g._count.id }));
-
-        const recentActivity = await prisma.auditLog.findMany({
-            orderBy: { createdAt: 'desc' },
-            take: 10
-        });
-
-        // Submission trend (last 7 days)
+        // These queries are independent of each other, so they run concurrently.
+        // Serially this was ~15 round-trips to Supabase on every dashboard load,
+        // which on a cold serverless container can run past the function's time
+        // limit — and a timed-out function returns Vercel's HTML error page, not
+        // JSON, which is what surfaced as "Server returned non-JSON response".
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const trend = await prisma.weeklyReport.groupBy({
-            by: ['createdAt'],
-            _count: { id: true },
-            where: { createdAt: { gte: sevenDaysAgo } },
-            orderBy: { createdAt: 'asc' }
-        });
+
+        const [
+            totalStudents,
+            totalActiveUsers,
+            cycle,
+            openCyclesPastDue,
+            needsSupportReports,
+            activeAlertsCount,
+            typeGroups,
+            recentActivity,
+            trend,
+            allRatings,
+            totalProgramManagers,
+            totalPathways,
+            totalClasses,
+        ] = await Promise.all([
+            prisma.user.count({ where: { role: { in: STUDENT_LEVEL }, isActive: true } }),
+            prisma.user.count({ where: { isActive: true } }),
+            prisma.reportCycle.findFirst({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' } }),
+            prisma.reportCycle.count({ where: { status: 'OPEN', endDate: { lt: new Date() } } }),
+            prisma.weeklyReport.findMany({ where: { needsSupport: true }, select: { studentId: true } }),
+            prisma.alert.count({ where: { resolved: false } }),
+            prisma.alert.groupBy({ by: ['type'], _count: { id: true } }),
+            prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }),
+            prisma.weeklyReport.groupBy({
+                by: ['createdAt'],
+                _count: { id: true },
+                where: { createdAt: { gte: sevenDaysAgo } },
+                orderBy: { createdAt: 'asc' }
+            }),
+            prisma.classRating.findMany({ select: { rating: true } }),
+            prisma.user.count({ where: { role: 'PROGRAM_MANAGER', isActive: true } }),
+            prisma.pathway.count({ where: { isActive: true } }),
+            prisma.classModel.count({ where: { isActive: true } }),
+        ]);
+
+        let submissionRate = 0;
+        let reviewedRate = 0;
+        let submittedCount = 0;
+
+        if (cycle) {
+            const [submitted, reviewed] = await Promise.all([
+                prisma.weeklyReport.count({ where: { cycleId: cycle.id, status: 'SUBMITTED' } }),
+                prisma.weeklyReport.count({ where: { cycleId: cycle.id, status: 'REVIEWED' } }),
+            ]);
+            submittedCount = submitted;
+            if (totalStudents > 0) submissionRate = Math.round((submitted / totalStudents) * 100);
+            if (submitted > 0) reviewedRate = Math.round((reviewed / submitted) * 100);
+        }
+
+        const overdueReports = openCyclesPastDue * totalStudents;
+        const studentsNeedingSupport = new Set(needsSupportReports.map(r => r.studentId)).size;
+        const alertDistribution = typeGroups.map(g => ({ type: g.type, count: g._count.id }));
         const submissionTrend = trend.map(t => ({ date: t.createdAt.toISOString().split('T')[0], count: t._count.id }));
 
         // Class performance aggregation
-        const allRatings = await prisma.classRating.findMany();
         const performance = {
             EXCEEDING: allRatings.filter(r => r.rating === 'EXCEEDING').length,
             MEETING: allRatings.filter(r => r.rating === 'MEETING').length,
@@ -770,10 +789,10 @@ router.get('/admin/analytics', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM
         res.json({
             totalStudents,
             totalActiveUsers,
-            totalProgramManagers: await prisma.user.count({ where: { role: 'PROGRAM_MANAGER', isActive: true } }),
-            totalPathways: await prisma.pathway.count({ where: { isActive: true } }),
-            totalClasses: await prisma.classModel.count({ where: { isActive: true } }),
-            submittedReportsThisCycle: cycle ? await prisma.weeklyReport.count({ where: { cycleId: cycle.id, status: 'SUBMITTED' } }) : 0,
+            totalProgramManagers,
+            totalPathways,
+            totalClasses,
+            submittedReportsThisCycle: submittedCount,
             submissionRate,
             reviewedRate,
             overdueReports,
@@ -785,7 +804,10 @@ router.get('/admin/analytics', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM
             recentActivity
         });
     } catch(e) {
-        res.status(500).json({ error: 'Server error' });
+        // Previously swallowed silently, so a failure left no trace in the Vercel
+        // logs at all. Hand it to the central error handler, which logs method +
+        // path + the real error and returns JSON.
+        return next(e);
     }
 });
 

@@ -36,13 +36,19 @@ const PROVIDER_BUTTONS: Record<OAuthProvider, { label: string; icon: () => React
 };
 
 export function Login() {
-  const { user, loading: authLoading, login, loginWithProvider } = useAuth();
+  const { user, loading: authLoading, login, loginWithProvider, requestPasswordReset, resetPassword } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+
+  // Password reset / first-time password: 'off' → 'code' (code emailed) → done.
+  const [resetStep, setResetStep] = useState<'off' | 'code'>('off');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [noticeMsg, setNoticeMsg] = useState('');
 
   // A refreshed page keeps its Clerk session — send an already-signed-in user
   // straight to their dashboard instead of showing the login form again.
@@ -62,6 +68,47 @@ export function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRequestReset = async () => {
+    setErrorMsg('');
+    setNoticeMsg('');
+    if (!email.trim()) {
+      setErrorMsg('Enter your email address first, then request the code.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await requestPasswordReset(email);
+      setResetStep('code');
+      setNoticeMsg(`If an account exists for ${email.trim()}, a 6-digit code is on its way. Enter it below with your new password.`);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Could not send the code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: any) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      await resetPassword(resetCode, newPassword);
+      navigate('/dashboard-redirect');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Could not set the password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelReset = () => {
+    setResetStep('off');
+    setResetCode('');
+    setNewPassword('');
+    setErrorMsg('');
+    setNoticeMsg('');
   };
 
   const handleProvider = async (provider: OAuthProvider) => {
@@ -99,7 +146,32 @@ export function Login() {
                 {errorMsg}
               </div>
             )}
+            {noticeMsg && (
+              <div className="mb-5 p-3 rounded-xl bg-orange-50 border border-orange-100 text-sm text-[#9A4A00] font-medium">
+                {noticeMsg}
+              </div>
+            )}
 
+            {resetStep === 'code' ? (
+              /* Set a new password with the emailed code. Also the way an account
+                 created through Google gains a password for email + password sign-in. */
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <Input label="Email" type="email" value={email} onChange={(v: string) => setEmail(v)} required autoComplete="email" />
+                <Input label="6-digit code from your email" type="text" value={resetCode} onChange={(v: string) => setResetCode(v)} required autoComplete="one-time-code" />
+                <Input label="New password" type="password" value={newPassword} onChange={(v: string) => setNewPassword(v)} required minLength={8} autoComplete="new-password" />
+                <Button type="submit" disabled={loading} className="w-full h-12 text-base mt-2">
+                  {loading ? <><LoaderCircle className="w-4 h-4 animate-spin" /> Saving…</> : 'Set password and sign in'}
+                </Button>
+                <div className="flex items-center justify-between pt-1">
+                  <button type="button" onClick={cancelReset} className="text-sm font-semibold text-gray-500 hover:text-[#0A0A0A]">
+                    Back to sign in
+                  </button>
+                  <button type="button" disabled={loading} onClick={handleRequestReset} className="text-sm font-semibold text-[#FF7A00] hover:underline disabled:opacity-50">
+                    Resend code
+                  </button>
+                </div>
+              </form>
+            ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <Input label="Email" type="email" value={email} onChange={(v: string) => setEmail(v)} required autoComplete="email" />
               <Input label="Password" type="password" value={password} onChange={(v: string) => setPassword(v)} required autoComplete="current-password" />
@@ -114,12 +186,21 @@ export function Login() {
                   />
                   <span className="text-sm font-semibold text-gray-600">Remember me</span>
                 </label>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={handleRequestReset}
+                  className="text-sm font-semibold text-[#FF7A00] hover:underline disabled:opacity-50"
+                >
+                  Forgot / set password
+                </button>
               </div>
 
               <Button type="submit" disabled={loading} className="w-full h-12 text-base mt-2">
                 {loading ? <><LoaderCircle className="w-4 h-4 animate-spin" /> Signing in…</> : 'Sign In'}
               </Button>
             </form>
+            )}
 
             {ENABLED_OAUTH_PROVIDERS.length > 0 && (
               <>
