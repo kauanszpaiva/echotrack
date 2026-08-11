@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "//": "Migrations are deliberately NOT run here. Vercel builds previews and production concurrently, and every one of them points at the same Supabase database, so `prisma migrate deploy` in the build step would race (parallel deploys applying the same migration) and would let a preview build mutate the production schema. Migrations are an explicit, serialised step: `npm run db:deploy` (see SUPABASE_SETUP.md).",
   "buildCommand": "prisma generate && vite build",
   "outputDirectory": "dist",
   "framework": null,
