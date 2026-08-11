@@ -32,6 +32,13 @@ npm run build       # production build
 ## Deploy (Vercel + Supabase + Clerk)
 See **`SUPABASE_SETUP.md`** for the full step-by-step (connection strings, env vars, Clerk auth).
 
+The Vercel build runs `prisma generate && vite build` — **migrations are not part of it**.
+Vercel builds previews and production concurrently against the same Supabase database, so
+`prisma migrate deploy` at build time would race between parallel deployments and would let a
+preview build alter the production schema. Run `npm run db:deploy` as an explicit step *before*
+deploying code that needs a new column (`vercel.json` deliberately has no migration step;
+the reasoning lives in `SUPABASE_SETUP.md` → Deploy, since `vercel.json` rejects comments).
+
 ## Running Locally
 Start both the Vite frontend and Express backend:
 `npm run dev`
