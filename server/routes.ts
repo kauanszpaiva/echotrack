@@ -6,7 +6,7 @@ import { authMiddleware, AuthRequest, roleMiddleware } from './auth.js';
 import { JWT_SECRET } from './config.js';
 import prisma from './prisma.js';
 import { isAdminLevel, isCoachLevel, isStudentLevel, STUDENT_LEVEL, COACH_LEVEL } from '../shared/roles.js';
-import { provisionSupabaseAuthUser } from './supabaseAdmin.js';
+import { provisionClerkUser } from './clerkAdmin.js';
 
 const router = Router();
 
@@ -79,73 +79,6 @@ function getCookieOptions(req: any) {
   };
 }
 
-import { verifyIdToken } from './firebase-admin.js';
-
-router.post('/auth/oauth', async (req, res) => {
-  try {
-    const { idToken } = req.body;
-    if (!idToken) return res.status(400).json({ error: 'Missing idToken' });
-
-    let decoded;
-    try {
-      decoded = await verifyIdToken(idToken);
-    } catch (e) {
-      return res.status(401).json({ error: 'Invalid Firebase token' });
-    }
-
-    if (!decoded.email) {
-      return res.status(400).json({ error: 'Provider did not return an email' });
-    }
-
-    const email = decoded.email.toLowerCase();
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user) {
-      return res.status(404).json({
-        error: 'No account found for this email',
-        email,
-        name: decoded.name,
-      });
-    }
-
-    if (!user.isActive || user.accountStatus === 'DEACTIVATED') {
-      return res.status(403).json({ error: 'Account deactivated' });
-    }
-
-    if (user.accountStatus === 'INVITED') {
-      return res.status(403).json({
-        error: 'Account not yet activated. Use your setup link first.',
-      });
-    }
-
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, name: user.name },
-      JWT_SECRET,
-      { expiresIn: '1d' }
-    );
-
-    res.cookie('token', token, getCookieOptions(req));
-
-    await prisma.auditLog.create({
-      data: {
-        actorId: user.id,
-        actorRole: user.role,
-        action: 'LOGIN',
-        entityType: 'User',
-        entityId: user.id,
-        description: `OAuth login via ${decoded.provider}`,
-      },
-    });
-
-    res.json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
-    });
-  } catch (err) {
-    console.error('OAuth error:', err);
-    res.status(500).json({ error: 'OAuth login failed' });
-  }
-});
-
 router.post('/setup-account', async (req: any, res: any) => {
     try {
         const token = requiredString(req.body.token, 'token', 256);
@@ -159,9 +92,9 @@ router.post('/setup-account', async (req: any, res: any) => {
             return res.status(400).json({ error: 'Invalid or expired token' });
         }
 
-        // Create the Supabase auth identity for this invited user (role from the
-        // invite row, authoritative in app_metadata), then activate the mirror.
-        await provisionSupabaseAuthUser({
+        // Create the Clerk auth identity for this invited user (role from the
+        // invite row, authoritative in publicMetadata), then activate the mirror.
+        await provisionClerkUser({
             email: user.email, password: String(password), name: user.name, role: user.role,
         });
 
@@ -248,16 +181,16 @@ router.post('/signup', async (req, res) => {
             return res.status(400).json({ error: 'Invalid class selection' });
         }
 
-        // Create the Supabase auth identity first (role in app_metadata), then
-        // mirror the student + profile into Postgres using the Supabase user id.
-        const supabaseUserId = await provisionSupabaseAuthUser({
+        // Create the Clerk auth identity first (role in publicMetadata), then
+        // mirror the student + profile into Postgres using the Clerk user id.
+        const clerkUserId = await provisionClerkUser({
             email: normalizedEmail, password: String(password), name: cleanName, role: 'STUDENT',
         });
 
         const student = await prisma.$transaction(async (tx) => {
              const user = await tx.user.create({
                  data: {
-                     id: supabaseUserId,
+                     id: clerkUserId,
                      name: cleanName, email: normalizedEmail, password: '',
                      role: 'STUDENT', accountStatus: 'ACTIVE'
                  }
@@ -683,15 +616,15 @@ router.post('/admin/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'P
 
         if (!password || typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
-        // Create the auth identity in Supabase (role authoritative in app_metadata),
-        // then mirror it into Postgres using the Supabase user id.
-        const supabaseUserId = await provisionSupabaseAuthUser({
+        // Create the auth identity in Clerk (role authoritative in publicMetadata),
+        // then mirror it into Postgres using the Clerk user id.
+        const clerkUserId = await provisionClerkUser({
             email: normalizedEmail, password, name: cleanName, role: newRole,
         });
 
         const user = await prisma.user.create({
             data: {
-                id: supabaseUserId,
+                id: clerkUserId,
                 name: cleanName,
                 email: normalizedEmail,
                 role: newRole,

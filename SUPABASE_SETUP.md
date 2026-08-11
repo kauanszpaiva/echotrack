@@ -1,6 +1,6 @@
-# EchoTrack — Supabase + Vercel Setup
+# EchoTrack — Supabase + Clerk + Vercel Setup
 
-This app uses **Supabase Auth** in the browser and **Supabase Postgres** as its
+This app uses **Clerk** for authentication and **Supabase Postgres** as its
 database (via Prisma). Follow these steps once to go live on Vercel.
 
 ---
@@ -12,11 +12,6 @@ database (via Prisma). Follow these steps once to go live on Vercel.
 3. Wait for provisioning to finish.
 
 ## 2. Get the connection strings
-
-In **Project Settings → API**, copy the project URL and anon/publishable key to
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. These values are designed for
-browser use; authorization must be enforced with Row Level Security. Never use
-the service-role key in a `VITE_` variable.
 
 In the project: **Connect** (top bar) → **ORMs** → **Prisma**. Copy the two URLs:
 
@@ -40,21 +35,40 @@ npm run db:deploy   # applies prisma/migrations to Supabase
 > On Vercel this also runs automatically at build time (see `vercel.json` →
 > `prisma migrate deploy`), so this local step is optional but good for a first check.
 
-## 4. Create the first admin
+## 4. Set up Clerk
+
+1. Create an application in the **Clerk Dashboard** (this project is linked to
+   `app_3Hma00OGmfOMnFAge9f9gTunNpP`).
+2. In **API keys**, copy the **Publishable key** (`pk_...`) and **Secret key**
+   (`sk_...`).
+3. Enable **Email + password** sign-in. Optionally enable Google / Microsoft /
+   Apple under **User & Authentication → Social connections** (the login screen
+   shows all three buttons).
+
+The authoritative application role is stored in Clerk **`publicMetadata.role`**
+(admin-only, not user-editable). The first authenticated request mirrors the
+user into the Postgres `users` table automatically (joined by email).
+
+## 5. Create the first admin
 
 Easiest: run the seed after configuring env vars, which provisions the admin in
-Supabase Auth **and** Postgres:
+Clerk **and** Postgres:
 
 ```bash
-DEV_ADMIN_PASSWORD='a-strong-password' npm run db:seed
+CLERK_SECRET_KEY='sk_...' DEV_ADMIN_PASSWORD='a-strong-password' npm run db:seed
 ```
 
-Or create the user manually in **Authentication → Users**, then set the role in
-**`app_metadata`** (`{"role":"ADMIN"}`) — NOT `user_metadata`, which the user can
-edit. The backend only trusts `app_metadata`. The first authenticated request
-mirrors the user into the Postgres `users` table automatically.
+Or create the user manually in the **Clerk Dashboard → Users**, then set
+`publicMetadata` to `{"role":"ADMIN"}`.
 
-## 5. Configure Vercel environment variables
+To migrate an existing set of Postgres users into Clerk in one pass:
+
+```bash
+CLERK_SECRET_KEY='sk_...' DATABASE_URL='...' DIRECT_URL='...' \
+  npx tsx prisma/backfill-clerk-auth.ts
+```
+
+## 6. Configure Vercel environment variables
 
 Vercel dashboard → your project → **Settings → Environment Variables**
 (set for **Production** + **Preview**):
@@ -65,21 +79,13 @@ Vercel dashboard → your project → **Settings → Environment Variables**
 | `DIRECT_URL`                    | direct URL from step 2 (port 5432)                            |
 | `CORS_ORIGINS`                  | your domain, e.g. `https://echotrack.vercel.app`              |
 | `NODE_ENV`                      | `production`                                                  |
-| `VITE_SUPABASE_URL`             | project URL from Supabase Project Settings → API              |
-| `VITE_SUPABASE_ANON_KEY`        | anon/publishable key from Supabase Project Settings → API     |
-| `SUPABASE_URL`                  | same project URL (server-side; used to validate access tokens)|
-| `SUPABASE_SERVICE_ROLE_KEY`     | **secret** service-role key (Project Settings → API). Never expose to the browser. |
+| `VITE_CLERK_PUBLISHABLE_KEY`    | Clerk publishable key (`pk_...`) — public, browser-safe       |
+| `CLERK_PUBLISHABLE_KEY`         | same publishable key (server-side)                            |
+| `CLERK_SECRET_KEY`              | **secret** Clerk key (`sk_...`). Never expose to the browser. |
 
-> `JWT_SECRET` is no longer required — authentication is unified on Supabase Auth.
-> The backend validates the Supabase access token the browser sends and reads the
-> user's role from `app_metadata` (admin-only, not user-editable).
-
-## 6. Supabase OAuth (optional — Google / Microsoft / Apple)
-
-Skip if you only use email/password.
-
-Enable each provider in **Supabase Dashboard → Authentication → Providers** and
-add the app's `/dashboard-redirect` URL to the allowed redirect URLs.
+> `JWT_SECRET` is no longer required — authentication is handled by Clerk. The
+> backend verifies the Clerk session token the browser sends and reads the
+> user's role from `publicMetadata` (admin-only, not user-editable).
 
 ## 7. Deploy
 
@@ -101,17 +107,17 @@ and serves the SPA from `dist/` with the API at `/api/*` (see `vercel.json`).
 - **DB:** Supabase Postgres via Prisma. Runtime uses the pooled `DATABASE_URL`;
   migrations use `DIRECT_URL`. A single cached `PrismaClient` (`server/prisma.ts`)
   avoids exhausting connections on serverless.
-- **Auth:** unified on Supabase Auth. The browser signs in with Supabase and
-  sends the access token to the API (`Authorization: Bearer …`); the backend
-  validates it and reads the role from `app_metadata` (authoritative, admin-only),
-  mirroring the user into Postgres (joined by email) for relational queries.
-  Roles: `DEV`, `ADMIN`, `PROGRAM_MANAGER`, `COACH`, `PSM`, `STUDENT`, `INTERN`,
-  `INSTRUCTOR` (default `STUDENT`).
+- **Auth:** handled by Clerk. The browser signs in with Clerk and sends the
+  session token to the API (`Authorization: Bearer …`); `clerkMiddleware()`
+  verifies it and the backend reads the role from `publicMetadata` (authoritative,
+  admin-only), mirroring the user into Postgres (joined by email) for relational
+  queries. Roles: `DEV`, `ADMIN`, `PROGRAM_MANAGER`, `COACH`, `PSM`, `STUDENT`,
+  `INTERN`, `INSTRUCTOR` (default `STUDENT`).
 
 ## Local development
 
 ```bash
-cp .env.example .env.local # fill Supabase client and database values
+cp .env.example .env.local # fill Clerk keys and database values
 npm install
 npm run db:deploy
 npm run dev               # http://localhost:3000

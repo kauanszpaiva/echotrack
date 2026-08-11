@@ -1,44 +1,44 @@
 import { Request, Response, NextFunction } from 'express';
+import { getAuth, clerkClient } from '@clerk/express';
 import prisma from './prisma.js';
 import { expandRoles } from '../shared/roles.js';
 import {
-  getUserFromToken,
-  roleFromSupabaseUser,
-  nameFromSupabaseUser,
-} from './supabaseAdmin.js';
+  roleFromClerkUser,
+  nameFromClerkUser,
+  primaryEmail,
+} from './clerkAdmin.js';
 
 export interface AuthRequest extends Request {
   user?: any;
 }
 
 /**
- * Unified authentication: the browser authenticates with Supabase Auth and
- * sends the Supabase access token (Authorization: Bearer <token>). We validate
- * it server-side, read the authoritative role from app_metadata, and mirror the
- * user into the local Postgres `users` table (joined by email) so all existing
- * relational logic keyed on `req.user.id` keeps working unchanged.
+ * Unified authentication: the browser authenticates with Clerk and its session
+ * token is verified by `clerkMiddleware()` (mounted in server/app.ts). We read
+ * the authenticated Clerk user, take the authoritative role from
+ * publicMetadata, and mirror the user into the local Postgres `users` table
+ * (joined by email) so all existing relational logic keyed on `req.user.id`
+ * keeps working unchanged.
  */
 export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
-  const authHeader = req.headers?.authorization;
-  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  const token = bearerToken || req.cookies?.['sb-access-token'] || req.cookies?.token;
+  const { userId } = getAuth(req);
 
-  if (!token) {
+  if (!userId) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
   try {
-    const supabaseUser = await getUserFromToken(token);
-    if (!supabaseUser || !supabaseUser.email) {
+    const clerkUser = await clerkClient.users.getUser(userId);
+    const email = primaryEmail(clerkUser);
+    if (!email) {
       return res.status(401).json({ error: 'Invalid token' });
     }
 
-    const email = supabaseUser.email.toLowerCase();
-    const role = roleFromSupabaseUser(supabaseUser);
-    const name = nameFromSupabaseUser(supabaseUser);
+    const role = roleFromClerkUser(clerkUser);
+    const name = nameFromClerkUser(clerkUser);
 
     // Find the mirrored DB row (join by email). Provision one just-in-time if it
-    // doesn't exist yet (e.g. a user created directly in the Supabase dashboard).
+    // doesn't exist yet (e.g. a user created directly in the Clerk dashboard).
     let dbUser = await prisma.user.findUnique({
       where: { email },
       select: { id: true, email: true, name: true, role: true, accountStatus: true, isActive: true },
@@ -46,11 +46,11 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
 
     if (!dbUser) {
       dbUser = await prisma.user.create({
-        data: { id: supabaseUser.id, email, name, role, password: '', accountStatus: 'ACTIVE', isActive: true },
+        data: { id: clerkUser.id, email, name, role, password: '', accountStatus: 'ACTIVE', isActive: true },
         select: { id: true, email: true, name: true, role: true, accountStatus: true, isActive: true },
       });
     } else if (dbUser.role !== role) {
-      // Keep the mirror in sync with the authoritative app_metadata role.
+      // Keep the mirror in sync with the authoritative publicMetadata role.
       dbUser = await prisma.user.update({
         where: { email },
         data: { role },
@@ -62,7 +62,7 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
       return res.status(401).json({ error: 'Account is not active' });
     }
 
-    // Role comes from the verified Supabase token (authoritative source).
+    // Role comes from the verified Clerk user (authoritative source).
     req.user = { id: dbUser.id, email: dbUser.email, name: dbUser.name, role };
     next();
   } catch (err) {
