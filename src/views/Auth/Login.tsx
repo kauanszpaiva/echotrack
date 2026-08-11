@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
+import { ENABLED_OAUTH_PROVIDERS, useAuth, type OAuthProvider } from '../../hooks/useAuth';
 import { Logo } from '../../components/Logo';
 import { Button, Input, Card } from '../../components/ui/Common';
 import { LoaderCircle } from 'lucide-react';
@@ -29,14 +29,26 @@ const AppleIcon = () => (
   </svg>
 );
 
+const PROVIDER_BUTTONS: Record<OAuthProvider, { label: string; icon: () => ReactElement }> = {
+  google: { label: 'Continue with Google', icon: GoogleIcon },
+  microsoft: { label: 'Continue with Microsoft', icon: MicrosoftIcon },
+  apple: { label: 'Continue with Apple', icon: AppleIcon },
+};
+
 export function Login() {
-  const { login, loginWithProvider } = useAuth();
+  const { user, loading: authLoading, login, loginWithProvider } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+
+  // A refreshed page keeps its Clerk session — send an already-signed-in user
+  // straight to their dashboard instead of showing the login form again.
+  useEffect(() => {
+    if (!authLoading && user) navigate('/dashboard-redirect', { replace: true });
+  }, [authLoading, user, navigate]);
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
@@ -52,19 +64,15 @@ export function Login() {
     }
   };
 
-  const handleProvider = async (provider: 'google' | 'microsoft' | 'apple') => {
+  const handleProvider = async (provider: OAuthProvider) => {
     setErrorMsg('');
     setLoading(true);
     try {
+      // Redirects the browser to the provider on success; control only comes
+      // back here when the handshake could not be started.
       await loginWithProvider(provider);
-      navigate('/dashboard-redirect');
     } catch (err: any) {
-      if (err.status === 404 && err.email) {
-        navigate(`/signup?email=${encodeURIComponent(err.email)}&name=${encodeURIComponent(err.name || '')}`);
-        return;
-      }
       setErrorMsg(err.message || `${provider} sign-in failed.`);
-    } finally {
       setLoading(false);
     }
   };
@@ -113,30 +121,31 @@ export function Login() {
               </Button>
             </form>
 
-            <div className="relative my-7">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-white px-3 text-gray-400 uppercase tracking-widest font-bold">Or continue with</span>
-              </div>
-            </div>
+            {ENABLED_OAUTH_PROVIDERS.length > 0 && (
+              <>
+                <div className="relative my-7">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="bg-white px-3 text-gray-400 uppercase tracking-widest font-bold">Or continue with</span>
+                  </div>
+                </div>
 
-            <div className="space-y-3">
-              <button type="button" disabled={loading} onClick={() => handleProvider('google')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
-                <div className="absolute left-4"><GoogleIcon /></div>
-                <span className="font-semibold text-sm text-gray-700">Continue with Google</span>
-              </button>
-              <button type="button" disabled={loading} onClick={() => handleProvider('microsoft')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
-                <div className="absolute left-4"><MicrosoftIcon /></div>
-                <span className="font-semibold text-sm text-gray-700">Continue with Microsoft</span>
-              </button>
-              <button type="button" disabled={loading} onClick={() => handleProvider('apple')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
-                <div className="absolute left-4"><AppleIcon /></div>
-                <span className="font-semibold text-sm text-gray-700">Continue with Apple</span>
-              </button>
-            </div>
+                {/* Only providers actually enabled for this Clerk instance are
+                    shown (VITE_OAUTH_PROVIDERS), so no button leads to a dead end. */}
+                <div className="space-y-3">
+                  {ENABLED_OAUTH_PROVIDERS.map((provider) => {
+                    const { label, icon: Icon } = PROVIDER_BUTTONS[provider];
+                    return (
+                      <button key={provider} type="button" disabled={loading} onClick={() => handleProvider(provider)}
+                        className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
+                        <div className="absolute left-4"><Icon /></div>
+                        <span className="font-semibold text-sm text-gray-700">{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </Card>
 
           <p className="mt-6 text-center text-sm text-gray-600">
