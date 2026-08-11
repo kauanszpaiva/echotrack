@@ -1,5 +1,29 @@
 import { useEffect } from 'react';
 import { X } from 'lucide-react';
+import { ROLE_BADGE } from '../../types';
+import type { UserRole } from '../../types';
+
+/**
+ * Renders every title a person holds. Most people have exactly one; staff who
+ * wear two hats (a PSM who also coaches, a coach who teaches a class) get a
+ * badge each, leading with their account role.
+ */
+export const TitleBadges = ({ titles }: { titles?: UserRole[] }) => (
+  <>
+    {(titles ?? []).map((title) => {
+      const badge = ROLE_BADGE[title];
+      if (!badge) return null;
+      return (
+        <span
+          key={title}
+          className={`text-[9px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded border ${badge.bg} ${badge.text} ${badge.border}`}
+        >
+          {badge.label}
+        </span>
+      );
+    })}
+  </>
+);
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

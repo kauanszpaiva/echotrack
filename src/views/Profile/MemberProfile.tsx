@@ -9,9 +9,12 @@ import { Button, Input, Select } from '../../components/ui/Common';
 import { LoadingState, ErrorState } from '../../components/ui/States';
 import { safeFetch, downloadFile } from '../../lib/fetchUtils';
 import { useAuth } from '../../hooks/useAuth';
-import { ROLE_BADGE, EMPLOYMENT_TYPE_OPTIONS, LOCATION_TYPE_OPTIONS } from '../../types';
+import { EMPLOYMENT_TYPE_OPTIONS, LOCATION_TYPE_OPTIONS } from '../../types';
 import type { MemberProfile as Profile, ProfileMember } from '../../types';
-import { Modal, SectionCard, Textarea, dateRange, duration, joinParts, monthYear, toMonthInput } from './helpers';
+import {
+  Modal, SectionCard, Textarea, TitleBadges,
+  dateRange, duration, joinParts, monthYear, toMonthInput,
+} from './helpers';
 
 type ModalKind = 'intro' | 'experience' | 'education' | 'certification' | 'skills' | null;
 
@@ -99,7 +102,6 @@ export function MemberProfile() {
   if (error || !data) return <ErrorState message={error || 'Profile unavailable.'} onRetry={load} />;
 
   const { profile, member, isOwner } = data;
-  const badge = ROLE_BADGE[member.role];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -153,13 +155,9 @@ export function MemberProfile() {
           </div>
 
           <div className="mt-5">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">{member.name}</h1>
-              {badge && (
-                <span className={`text-[9px] uppercase font-bold tracking-widest px-2 py-1 rounded border ${badge.bg} ${badge.text} ${badge.border}`}>
-                  {badge.label}
-                </span>
-              )}
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A] mr-1">{member.name}</h1>
+              <TitleBadges titles={member.titles} />
             </div>
 
             {profile.headline && <p className="text-lg text-gray-700 mt-2 font-medium">{profile.headline}</p>}

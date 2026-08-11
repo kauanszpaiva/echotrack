@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Prisma } from '@prisma/client';
 import { authMiddleware, AuthRequest } from './auth.js';
 import prisma from './prisma.js';
-import { isAdminLevel } from '../shared/roles.js';
+import { isAdminLevel, isCoachLevel, STUDENT_LEVEL } from '../shared/roles.js';
 import { generateResumePdf } from './exports.js';
 
 const router = Router();
@@ -118,7 +118,10 @@ async function ownProfileId(req: AuthRequest): Promise<string> {
 
 /**
  * Cohort membership lives on the student profile. Staff have no cohort of their
- * own, so PMs fall back to the communities they manage.
+ * own, so they inherit the cohorts of the students they serve: program managers
+ * through the communities they run and the students they oversee, coaches
+ * through their assigned students, instructors through the students enrolled in
+ * the classes they teach.
  */
 async function communityIdsForUser(userId: string, role: string): Promise<string[]> {
   const student = await prisma.studentProfile.findUnique({
@@ -127,14 +130,98 @@ async function communityIdsForUser(userId: string, role: string): Promise<string
   });
   if (student?.communityId) return [student.communityId];
 
+  const servedStudents: Prisma.StudentProfileWhereInput | null =
+    role === 'PROGRAM_MANAGER' ? { programManagerId: userId }
+      : isCoachLevel(role) ? { coachId: userId }
+      : role === 'INSTRUCTOR'
+        ? { classEnrollments: { some: { isActive: true, classModel: { instructorId: userId } } } }
+        : null;
+
+  const ids = new Set<string>();
+
+  if (servedStudents) {
+    const profiles = await prisma.studentProfile.findMany({
+      where: { ...servedStudents, communityId: { not: null } },
+      select: { communityId: true },
+      distinct: ['communityId'],
+    });
+    for (const profile of profiles) {
+      if (profile.communityId) ids.add(profile.communityId);
+    }
+  }
+
   if (role === 'PROGRAM_MANAGER') {
     const managed = await prisma.community.findMany({
       where: { programManagerId: userId, isActive: true },
       select: { id: true },
     });
-    return managed.map((community) => community.id);
+    for (const community of managed) ids.add(community.id);
   }
-  return [];
+
+  return [...ids];
+}
+
+/**
+ * The staff attached to a set of cohorts — the mirror of the rule above: the
+ * program managers who run them, the coaches assigned to their students, and
+ * the instructors teaching the classes those students take.
+ */
+async function staffIdsForCommunities(communityIds: string[]): Promise<string[]> {
+  const [communities, profiles] = await Promise.all([
+    prisma.community.findMany({
+      where: { id: { in: communityIds } },
+      select: { programManagerId: true },
+    }),
+    prisma.studentProfile.findMany({
+      where: { communityId: { in: communityIds } },
+      select: {
+        coachId: true,
+        programManagerId: true,
+        classEnrollments: {
+          where: { isActive: true },
+          select: { classModel: { select: { instructorId: true } } },
+        },
+      },
+    }),
+  ]);
+
+  const ids = new Set<string>();
+  for (const community of communities) {
+    if (community.programManagerId) ids.add(community.programManagerId);
+  }
+  for (const profile of profiles) {
+    if (profile.coachId) ids.add(profile.coachId);
+    if (profile.programManagerId) ids.add(profile.programManagerId);
+    for (const enrollment of profile.classEnrollments) {
+      if (enrollment.classModel?.instructorId) ids.add(enrollment.classModel.instructorId);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Someone can hold more than one title at once — a PSM who also coaches, or a
+ * coach who teaches a class. `role` stays the single authoritative value for
+ * access control; these extra titles are display-only and derived from the work
+ * the person actually does, so they never drift from the relational data.
+ */
+const TITLE_ORDER = ['PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'ADMIN', 'DEV', 'STUDENT', 'INTERN'];
+
+function titlesForUser(user: any): string[] {
+  const titles = new Set<string>();
+  if (user.role) titles.add(user.role);
+
+  const counts = user._count ?? {};
+  if (counts.classesTaught > 0) titles.add('INSTRUCTOR');
+  if (counts.assignedStudents > 0) titles.add('COACH');
+  if (counts.managedCommunities > 0 || counts.pmStudents > 0) titles.add('PROGRAM_MANAGER');
+
+  // Their account role always leads; the rest follow a stable order.
+  return [...titles].sort((a, b) => {
+    if (a === user.role) return -1;
+    if (b === user.role) return 1;
+    return TITLE_ORDER.indexOf(a) - TITLE_ORDER.indexOf(b);
+  });
 }
 
 function serialiseMember(user: any) {
@@ -143,6 +230,7 @@ function serialiseMember(user: any) {
     name: user.name,
     email: user.email,
     role: user.role,
+    titles: titlesForUser(user),
     avatarUrl: user.avatarUrl,
     community: user.studentProfile?.community
       ? { id: user.studentProfile.community.id, name: user.studentProfile.community.name }
@@ -161,7 +249,48 @@ const MEMBER_SELECT: Prisma.UserSelect = {
       pathway: { select: { id: true, name: true } },
     },
   },
+  // Drives the derived titles in `titlesForUser` — one query, no extra round trips.
+  _count: {
+    select: {
+      classesTaught: true,
+      assignedStudents: true,
+      managedCommunities: true,
+      pmStudents: true,
+    },
+  },
 };
+
+/** Roles that make up the staff grouping in the directory. Admins are omitted:
+ * they administer cohorts rather than belong to them. */
+const STAFF_ROLES = ['PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR'];
+
+/** The member fields plus the profile preview each directory card renders. */
+const DIRECTORY_SELECT: Prisma.UserSelect = {
+  ...MEMBER_SELECT,
+  memberProfile: {
+    select: {
+      headline: true,
+      location: true,
+      skills: { select: { name: true }, orderBy: { sortOrder: 'asc' }, take: 5 },
+      workExperiences: {
+        where: { isCurrent: true },
+        select: { title: true, company: true },
+        orderBy: { startDate: 'desc' },
+        take: 1,
+      },
+    },
+  },
+};
+
+function serialiseDirectoryEntry(user: any) {
+  return {
+    ...serialiseMember(user),
+    headline: user.memberProfile?.headline ?? null,
+    location: user.memberProfile?.location ?? null,
+    currentRole: user.memberProfile?.workExperiences?.[0] ?? null,
+    skills: (user.memberProfile?.skills ?? []).map((skill: any) => skill.name),
+  };
+}
 
 /* ──────────────────────────────── routes ────────────────────────────────── */
 
@@ -220,39 +349,44 @@ router.get('/profiles/directory', authMiddleware, async (req: AuthRequest, res) 
       }
       communityIds = requested ? [requested] : own;
       if (communityIds.length === 0) {
-        return res.json({ members: [], communities: [], communityId: null });
+        return res.json({ members: [], staff: [], communities: [], communityId: null });
       }
     }
 
-    const members = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        accountStatus: 'ACTIVE',
-        memberProfile: { isPublished: true },
-        ...(communityIds.length ? { studentProfile: { communityId: { in: communityIds } } } : {}),
-        ...(search
-          ? { OR: [{ name: { contains: search, mode: 'insensitive' as const } }] }
-          : {}),
-      },
-      select: {
-        ...MEMBER_SELECT,
-        memberProfile: {
-          select: {
-            headline: true,
-            location: true,
-            skills: { select: { name: true }, orderBy: { sortOrder: 'asc' as const }, take: 5 },
-            workExperiences: {
-              where: { isCurrent: true },
-              select: { title: true, company: true },
-              orderBy: { startDate: 'desc' as const },
-              take: 1,
-            },
-          },
+    // Everyone listed must be an active account that has opted into the directory.
+    const listable: Prisma.UserWhereInput = {
+      isActive: true,
+      accountStatus: 'ACTIVE',
+      memberProfile: { isPublished: true },
+      ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
+    };
+
+    const staffIds = communityIds.length ? await staffIdsForCommunities(communityIds) : [];
+
+    const [members, staff] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          ...listable,
+          // With a cohort selected, only students carry a community; without one
+          // (admins browsing everything) fall back to the student roles.
+          ...(communityIds.length
+            ? { studentProfile: { communityId: { in: communityIds } } }
+            : { role: { in: STUDENT_LEVEL } }),
         },
-      },
-      orderBy: { name: 'asc' },
-      take: 200,
-    });
+        select: DIRECTORY_SELECT,
+        orderBy: { name: 'asc' },
+        take: 200,
+      }),
+      prisma.user.findMany({
+        where: {
+          ...listable,
+          ...(communityIds.length ? { id: { in: staffIds } } : { role: { in: STAFF_ROLES } }),
+        },
+        select: DIRECTORY_SELECT,
+        orderBy: { name: 'asc' },
+        take: 200,
+      }),
+    ]);
 
     // Admins get the full picker; members only ever see their own cohorts.
     const communities = admin
@@ -270,13 +404,8 @@ router.get('/profiles/directory', authMiddleware, async (req: AuthRequest, res) 
     res.json({
       communityId: communityIds[0] ?? null,
       communities,
-      members: members.map((user: any) => ({
-        ...serialiseMember(user),
-        headline: user.memberProfile?.headline ?? null,
-        location: user.memberProfile?.location ?? null,
-        currentRole: user.memberProfile?.workExperiences?.[0] ?? null,
-        skills: (user.memberProfile?.skills ?? []).map((skill: any) => skill.name),
-      })),
+      members: members.map(serialiseDirectoryEntry),
+      staff: staff.map(serialiseDirectoryEntry),
     });
   } catch (e: any) {
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Failed to load the directory' });

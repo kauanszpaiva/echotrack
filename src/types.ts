@@ -130,7 +130,11 @@ export interface ProfileMember {
   id: string;
   name: string;
   email: string;
+  /** Authoritative role, used for access control. */
   role: UserRole;
+  /** Display titles — someone can hold several at once (a PSM who also
+   * coaches, a coach who teaches). Always leads with `role`. */
+  titles: UserRole[];
   avatarUrl: string | null;
   community: { id: string; name: string } | null;
   pathway: { id: string; name: string } | null;
