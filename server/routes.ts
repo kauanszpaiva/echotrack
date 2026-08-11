@@ -1,12 +1,9 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { authMiddleware, AuthRequest, roleMiddleware } from './auth.js';
-import { JWT_SECRET } from './config.js';
 import prisma from './prisma.js';
 import { isAdminLevel, isCoachLevel, isStudentLevel, STUDENT_LEVEL, COACH_LEVEL } from '../shared/roles.js';
-import { provisionClerkUser } from './clerkAdmin.js';
+import { provisionClerkUser, deleteClerkUser } from './clerkAdmin.js';
 
 const router = Router();
 
@@ -61,21 +58,13 @@ const PERFORMANCE_LEVELS = new Set(['EXCEEDING', 'MEETING', 'APPROACHING', 'BEGI
 
 console.log("[SERVER] Mounting routes...");
 
-function authError(res: any, status: number, code: string, message: string) {
-  return res.status(status).json({ code, error: message });
-}
+/** Invite links stop working after this window (defence against stale/leaked links). */
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-function getCookieOptions(req: any) {
-  const sameSite = process.env.COOKIE_SAMESITE === 'none' || process.env.FRONTEND_EMBEDDED === 'true' ? 'none' : 'lax';
-  const forwardedProto = String(req.get?.('x-forwarded-proto') || '');
-  const isHttps = req.secure || forwardedProto.split(',').some((proto) => proto.trim() === 'https');
-
+function newInvite() {
   return {
-    httpOnly: true,
-    secure: sameSite === 'none' || process.env.NODE_ENV === 'production' || isHttps,
-    sameSite: sameSite as 'lax' | 'none',
-    path: "/",
-    maxAge: 24 * 60 * 60 * 1000,
+    inviteToken: crypto.randomBytes(32).toString('hex'),
+    inviteExpires: new Date(Date.now() + INVITE_TTL_MS),
   };
 }
 
@@ -91,21 +80,34 @@ router.post('/setup-account', async (req: any, res: any) => {
         if (!user || user.accountStatus !== 'INVITED') {
             return res.status(400).json({ error: 'Invalid or expired token' });
         }
+        if (user.inviteExpires && user.inviteExpires.getTime() < Date.now()) {
+            return res.status(400).json({ error: 'Invalid or expired token' });
+        }
 
         // Create the Clerk auth identity for this invited user (role from the
         // invite row, authoritative in publicMetadata), then activate the mirror.
-        await provisionClerkUser({
+        const clerkUser = await provisionClerkUser({
             email: user.email, password: String(password), name: user.name, role: user.role,
         });
 
-        const updatedUser = await prisma.user.update({
-            where: { id: user.id },
-            data: {
-                password: '',
-                inviteToken: null,
-                accountStatus: 'ACTIVE',
-            }
-        });
+        let updatedUser;
+        try {
+            updatedUser = await prisma.user.update({
+                where: { id: user.id },
+                data: {
+                    // Link the invited mirror row to the Clerk identity just created.
+                    clerkUserId: clerkUser.id,
+                    inviteToken: null,
+                    inviteExpires: null,
+                    accountStatus: 'ACTIVE',
+                }
+            });
+        } catch (dbError) {
+            // Postgres failed after Clerk succeeded: undo the Clerk user we
+            // created so the invite stays usable instead of leaving an orphan.
+            if (clerkUser.created) await deleteClerkUser(clerkUser.id);
+            throw dbError;
+        }
 
         await prisma.auditLog.create({
            data: { actorId: updatedUser.id, actorRole: updatedUser.role, action: 'ACTIVATE', entityType: 'User', entityId: updatedUser.id, description: `User setup account via token` }
@@ -183,34 +185,43 @@ router.post('/signup', async (req, res) => {
 
         // Create the Clerk auth identity first (role in publicMetadata), then
         // mirror the student + profile into Postgres using the Clerk user id.
-        const clerkUserId = await provisionClerkUser({
+        const clerkUser = await provisionClerkUser({
             email: normalizedEmail, password: String(password), name: cleanName, role: 'STUDENT',
         });
 
-        const student = await prisma.$transaction(async (tx) => {
-             const user = await tx.user.create({
-                 data: {
-                     id: clerkUserId,
-                     name: cleanName, email: normalizedEmail, password: '',
-                     role: 'STUDENT', accountStatus: 'ACTIVE'
-                 }
-             });
+        let student;
+        try {
+            student = await prisma.$transaction(async (tx) => {
+                 const user = await tx.user.create({
+                     data: {
+                         id: clerkUser.id,
+                         clerkUserId: clerkUser.id,
+                         name: cleanName, email: normalizedEmail,
+                         role: 'STUDENT', accountStatus: 'ACTIVE'
+                     }
+                 });
 
-             const profile = await tx.studentProfile.create({
-                 data: {
-                     userId: user.id,
-                     programManagerId: pm.id,
-                     coachId: coach.id,
-                     pathwayId: pathway.id
-                 }
-             });
+                 const profile = await tx.studentProfile.create({
+                     data: {
+                         userId: user.id,
+                         programManagerId: pm.id,
+                         coachId: coach.id,
+                         pathwayId: pathway.id
+                     }
+                 });
 
-             await tx.studentClassEnrollment.createMany({
-                data: cleanClassIds.map(cid => ({ classId: cid, studentProfileId: profile.id }))
-             });
-             
-             return user;
-        });
+                 await tx.studentClassEnrollment.createMany({
+                    data: cleanClassIds.map(cid => ({ classId: cid, studentProfileId: profile.id }))
+                 });
+
+                 return user;
+            });
+        } catch (dbError) {
+            // Compensate: a Clerk identity with no application record would be
+            // able to sign in with no program, coach or classes attached.
+            if (clerkUser.created) await deleteClerkUser(clerkUser.id);
+            throw dbError;
+        }
 
         res.json({
           success: true,
@@ -425,64 +436,10 @@ router.post('/reports', authMiddleware, roleMiddleware(['STUDENT']), async (req,
         res.status(e.status || 500).json({ error: e.message || 'Server error' });
     }
 });
-router.post('/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const normalizedEmail = requiredString(email, 'email', 256).toLowerCase();
-    if (!password || typeof password !== 'string') {
-      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
-    }
-    console.log(`[LOGIN ATTEMPT] Email: ${normalizedEmail}`);
-
-    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    
-    if (!user) {
-      console.log(`[LOGIN FAILED] User not found: ${email}`);
-      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
-    }
-
-    if (user.accountStatus !== 'ACTIVE' || !user.isActive) {
-      console.log(`[LOGIN FAILED] User inactive or pending: ${email}, status: ${user.accountStatus}`);
-      return authError(res, 401, 'ACCOUNT_INACTIVE', 'Account is not active');
-    }
-
-    if (!user.password || !user.password.startsWith('$2')) {
-      console.log(`[LOGIN FAILED] Missing or invalid bcrypt password hash for: ${email}`);
-      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
-    }
-
-    const isValid = await bcrypt.compare(password, user.password);
-    if (!isValid) {
-      console.log(`[LOGIN FAILED] Wrong password for: ${email}`);
-      return authError(res, 401, 'AUTH_INVALID_CREDENTIALS', 'Invalid credentials');
-    }
-
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '1d' });
-    
-    console.log(`[LOGIN SUCCESS] User: ${user.name} (${user.role})`);
-    res.cookie('token', token, getCookieOptions(req));
-
-    await prisma.auditLog.create({
-      data: {
-        actorId: user.id, actorRole: user.role, action: 'LOGIN',
-        entityType: 'User', entityId: user.id, description: 'User login'
-      }
-    });
-
-    res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role } });
-  } catch (err: any) {
-    console.error('[LOGIN ERROR]', err);
-    res.status(err.status || 500).json({
-      code: err.status ? 'LOGIN_VALIDATION_ERROR' : 'LOGIN_SERVER_ERROR',
-      error: err.status ? err.message : 'Internal error'
-    });
-  }
-});
-
-router.post('/auth/logout', (req, res) => {
-  res.clearCookie('token', getCookieOptions(req));
-  res.json({ success: true });
-});
+// Legacy password/JWT login endpoints (POST /auth/login, POST /auth/logout)
+// were removed: Clerk owns identity, passwords and sessions. The browser signs
+// in with Clerk and sends the session token; the API only verifies it, and
+// signing out is a Clerk client operation (see server/auth.ts, src/hooks/useAuth).
 
 router.get('/auth/session', authMiddleware, async (req: AuthRequest, res) => {
   const user = await prisma.user.findUnique({ where: { id: (req as any).user.id }, select: { id: true, email: true, name: true, role: true } });
@@ -509,10 +466,19 @@ router.get('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async (re
     try {
         const pms = await prisma.user.findMany({
             where: { role: 'PROGRAM_MANAGER' },
-            select: { id: true, name: true, email: true, accountStatus: true, inviteToken: true },
+            select: { id: true, name: true, email: true, accountStatus: true, inviteToken: true, inviteExpires: true },
             orderBy: { createdAt: 'desc' }
         });
-        res.json(pms);
+        // The setup link is only meaningful for a pending, unexpired invite —
+        // don't hand out live tokens for anything else.
+        res.json(pms.map(({ inviteToken, inviteExpires, ...pm }) => ({
+            ...pm,
+            inviteExpires,
+            inviteToken:
+                pm.accountStatus === 'INVITED' && (!inviteExpires || inviteExpires.getTime() > Date.now())
+                    ? inviteToken
+                    : null,
+        })));
     } catch (e) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -618,22 +584,28 @@ router.post('/admin/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'P
 
         // Create the auth identity in Clerk (role authoritative in publicMetadata),
         // then mirror it into Postgres using the Clerk user id.
-        const clerkUserId = await provisionClerkUser({
+        const clerkUser = await provisionClerkUser({
             email: normalizedEmail, password, name: cleanName, role: newRole,
         });
 
-        const user = await prisma.user.create({
-            data: {
-                id: clerkUserId,
-                name: cleanName,
-                email: normalizedEmail,
-                role: newRole,
-                accountStatus: 'ACTIVE',
-                isActive: true,
-                password: '',
-                managerId: req.user.role === 'PROGRAM_MANAGER' ? req.user.id : undefined
-            }
-        });
+        let user;
+        try {
+            user = await prisma.user.create({
+                data: {
+                    id: clerkUser.id,
+                    clerkUserId: clerkUser.id,
+                    name: cleanName,
+                    email: normalizedEmail,
+                    role: newRole,
+                    accountStatus: 'ACTIVE',
+                    isActive: true,
+                    managerId: req.user.role === 'PROGRAM_MANAGER' ? req.user.id : undefined
+                }
+            });
+        } catch (dbError) {
+            if (clerkUser.created) await deleteClerkUser(clerkUser.id);
+            throw dbError;
+        }
         
         await prisma.auditLog.create({
            data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'USER', entityId: user.id, description: `${isAdminLevel(req.user?.role) ? 'Admin' : 'Program Manager'} registered ${newRole} ${cleanName}` }
@@ -649,8 +621,9 @@ router.post('/admin/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'P
             }
         });
     } catch(e: any) {
+        // Never echo the upstream (Clerk/Prisma) message back to the client.
         console.error('REGISTER ERROR:', e);
-        res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error: ' + (e.message || String(e)) });
+        res.status(e.status || 500).json({ error: e.status ? e.message : 'Unable to create the user' });
     }
 });
 
@@ -662,8 +635,8 @@ router.post('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async (r
         const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
         if (existing) return res.status(400).json({ error: 'User already exists' });
         
-        const inviteToken = crypto.randomBytes(16).toString('hex');
-        
+        const invite = newInvite();
+
         const user = await prisma.user.create({
             data: {
                 name,
@@ -671,8 +644,7 @@ router.post('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async (r
                 role: 'PROGRAM_MANAGER',
                 accountStatus: 'INVITED',
                 isActive: true,
-                password: '',
-                inviteToken
+                ...invite
             }
         });
         
@@ -688,7 +660,8 @@ router.post('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async (r
                 role: user.role,
                 accountStatus: user.accountStatus
             },
-            setupLink: `/setup-account?token=${inviteToken}`
+            setupLink: `/setup-account?token=${invite.inviteToken}`,
+            setupLinkExpiresAt: invite.inviteExpires.toISOString()
         });
     } catch(e: any) {
         res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' });
@@ -1519,7 +1492,7 @@ router.post('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), as
             return res.status(400).json({ error: 'Invalid role for PM to invite' });
         }
         
-        const inviteToken = crypto.randomBytes(16).toString('hex');
+        const invite = newInvite();
         const user = await prisma.user.create({
             data: {
                 name,
@@ -1527,8 +1500,7 @@ router.post('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), as
                 role,
                 accountStatus: 'INVITED',
                 isActive: true,
-                password: '',
-                inviteToken,
+                ...invite,
                 managerId: req.user.id
             }
         });
@@ -1537,7 +1509,11 @@ router.post('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), as
             data: { actorId: req.user.id, actorRole: req.user.role, action: 'CREATE', entityType: 'User', entityId: user.id, description: `PM invited ${role} ${name}` }
         });
 
-        res.json({ success: true, setupLink: `/setup-account?token=${inviteToken}` });
+        res.json({
+            success: true,
+            setupLink: `/setup-account?token=${invite.inviteToken}`,
+            setupLinkExpiresAt: invite.inviteExpires.toISOString()
+        });
     } catch(e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' }); }
 });
 
