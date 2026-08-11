@@ -30,25 +30,32 @@ async function main() {
   }
 
   console.log('Provisioning admin in Clerk...');
-  const clerkUserId = await provisionClerkUser({
+  const clerkUser = await provisionClerkUser({
     email: ADMIN_EMAIL,
     password: adminPassword,
     name: ADMIN_NAME,
     role: 'ADMIN',
   });
 
-  // Mirror into Postgres (joined by email; keep the Clerk id on create).
+  // Mirror into Postgres. Matched by email so an existing row keeps its primary
+  // key (and its relations) and simply gains the Clerk identity link.
   await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
-    update: { name: ADMIN_NAME, role: 'ADMIN', accountStatus: 'ACTIVE', isActive: true },
+    update: {
+      name: ADMIN_NAME,
+      role: 'ADMIN',
+      accountStatus: 'ACTIVE',
+      isActive: true,
+      clerkUserId: clerkUser.id,
+    },
     create: {
-      id: clerkUserId,
+      id: clerkUser.id,
+      clerkUserId: clerkUser.id,
       email: ADMIN_EMAIL,
       name: ADMIN_NAME,
       role: 'ADMIN',
       accountStatus: 'ACTIVE',
       isActive: true,
-      password: '',
     },
   });
 
