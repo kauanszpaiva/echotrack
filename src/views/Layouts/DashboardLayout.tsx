@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import {
@@ -14,10 +13,8 @@ export function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!loading && !user) navigate('/login', { replace: true });
-  }, [loading, user, navigate]);
-
+  // Authentication is enforced by <RequireAuth> above this layout; the checks
+  // below only cover the brief moment while Clerk is still loading.
   if (loading) return (
     <div className="flex items-center justify-center min-h-screen bg-[#FAFAFA]">
       <div className="text-sm text-gray-500">Loading…</div>

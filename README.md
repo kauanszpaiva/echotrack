@@ -21,16 +21,41 @@ Authentication is handled by **Clerk**; **Supabase Postgres** (via Prisma) is th
    *(Optional)* Seed a local admin (creates it in Clerk + Postgres):
    `CLERK_SECRET_KEY=sk_... DEV_ADMIN_PASSWORD=strong-pass NODE_ENV=development npm run db:seed`
 
+## Checks
+```bash
+npm run typecheck   # tsc --noEmit
+npm run lint        # eslint
+npm test            # vitest — authentication, authorization and CORS behaviour
+npm run build       # production build
+```
+
 ## Deploy (Vercel + Supabase + Clerk)
 See **`SUPABASE_SETUP.md`** for the full step-by-step (connection strings, env vars, Clerk auth).
+
+The Vercel build runs `prisma generate && vite build` — **migrations are not part of it**.
+Vercel builds previews and production concurrently against the same Supabase database, so
+`prisma migrate deploy` at build time would race between parallel deployments and would let a
+preview build alter the production schema. Run `npm run db:deploy` as an explicit step *before*
+deploying code that needs a new column (`vercel.json` deliberately has no migration step;
+the reasoning lives in `SUPABASE_SETUP.md` → Deploy, since `vercel.json` rejects comments).
 
 ## Running Locally
 Start both the Vite frontend and Express backend:
 `npm run dev`
 
 ## Roles
-- **Admin**: Full access.
-- **Program Manager**: Views their assigned students, coaches, and alerts.
-- **Coach**: Tracks individual student progress and flags alerts.
-- **Instructor**: Views class feedback and performance metrics.
-- **Student**: Submits weekly reports and views class tracking.
+The role lives in Clerk `publicMetadata.role` (admin-only, not user-editable) and
+is re-resolved from the verified Clerk user on every API request — the client
+never gets to declare its own role.
+
+| Role | Access |
+| --- | --- |
+| **Dev** | Everything Admin has, plus `/dev`. |
+| **Admin** | Full access to the admin area, settings, cycles, audit, conduct review. |
+| **Program Manager** | Their own students, coaches and alerts; the shared admin screens (users, reports, questions, analytics), scoped server-side to their people. |
+| **Coach** / **PSM** | Their assigned students' progress and alerts. |
+| **Instructor** | Their own classes, class feedback, and conduct entries for their students. |
+| **Student** / **Intern** | Their own weekly reports and class tracking. |
+
+Route guards in the SPA mirror this table, but they are UX only: every endpoint
+re-checks the role server-side (`server/auth.ts`).
