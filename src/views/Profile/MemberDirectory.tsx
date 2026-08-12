@@ -7,13 +7,25 @@ import { safeFetch } from '../../lib/fetchUtils';
 import type { DirectoryMember } from '../../types';
 import { TitleBadges } from './helpers';
 
+interface StaffGroup {
+  key: string;
+  label: string;
+  description: string;
+  people: DirectoryMember[];
+}
+
 interface DirectoryResponse {
+  /** The intake cycle this learning community belongs to, if assigned. */
+  cohort: { id: string; name: string } | null;
   communityId: string | null;
-  communities: { id: string; name: string }[];
-  /** Students in the cohort. */
+  communityName: string | null;
+  communities: { id: string; name: string; cohort?: { id: string; name: string } | null }[];
+  /** Students in the viewer's own learning community. */
   members: DirectoryMember[];
-  /** The coaches, program managers, and instructors serving that cohort. */
-  staff: DirectoryMember[];
+  /** Students in the cohort's other learning community. */
+  peers: DirectoryMember[];
+  /** Cohort staff, grouped by operating function. */
+  staff: StaffGroup[];
 }
 
 /**
@@ -54,7 +66,9 @@ export function MemberDirectory() {
       <div>
         <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Member Directory</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Published profiles from your community. Publish yours to appear here.
+          {data?.cohort
+            ? `${data.cohort.name}${data.communityName ? ` · ${data.communityName}` : ''} — published profiles across your cohort.`
+            : 'Published profiles from your learning community. Publish yours to appear here.'}
         </p>
       </div>
 
@@ -68,8 +82,8 @@ export function MemberDirectory() {
         />
         {(data?.communities.length ?? 0) > 1 && (
           <Select
-            label="Community"
-            placeholder="All communities"
+            label="Learning community"
+            placeholder="All learning communities"
             options={data!.communities.map((c) => ({ value: c.id, label: c.name }))}
             value={communityId}
             onChange={setCommunityId}
@@ -82,36 +96,53 @@ export function MemberDirectory() {
         <LoadingState message="Loading directory" />
       ) : error ? (
         <ErrorState message={error} onRetry={load} />
-      ) : !data || (data.members.length === 0 && data.staff.length === 0) ? (
+      ) : !data || (data.members.length === 0 && data.peers.length === 0 && data.staff.length === 0) ? (
         <EmptyState
           icon={Users}
           title="No published profiles yet"
           message={
             search
               ? 'Nobody matches that search.'
-              : 'Once people in your community publish their profiles, they will show up here.'
+              : 'Once people in your learning community publish their profiles, they will show up here.'
           }
         />
       ) : (
         <div className="space-y-10">
           <Group
-            title="Cohort members"
-            subtitle="Students in your community"
+            title={data.communityName || 'My learning community'}
+            subtitle="Students in your learning community"
             people={data.members}
             emptyMessage={search ? 'No members match that search.' : 'No members have published a profile yet.'}
           />
-          <Group
-            title="Coaches & staff"
-            subtitle="Program managers, coaches, PSMs, and instructors supporting this cohort"
-            people={data.staff}
-            emptyMessage={search ? 'No staff match that search.' : 'No staff have published a profile yet.'}
-          />
+
+          {/* A cohort runs two learning communities; the sibling only appears
+              once this one has been assigned to a cohort. */}
+          {data.peers.length > 0 && (
+            <Group
+              title="Across the cohort"
+              subtitle="Students in the cohort's other learning community"
+              people={data.peers}
+              emptyMessage=""
+            />
+          )}
+
+          {data.staff.map((group) => (
+            <Group
+              key={group.key}
+              title={group.label}
+              subtitle={group.description}
+              people={group.people}
+              emptyMessage=""
+            />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
+// `key` is declared explicitly because this project has no @types/react, so TS
+// does not special-case it as a reserved JSX attribute.
 function Group({
   title,
   subtitle,
@@ -122,6 +153,7 @@ function Group({
   subtitle: string;
   people: DirectoryMember[];
   emptyMessage: string;
+  key?: string;
 }) {
   return (
     <section>
@@ -132,7 +164,7 @@ function Group({
       <p className="text-sm text-gray-500 -mt-3 mb-5">{subtitle}</p>
 
       {people.length === 0 ? (
-        <p className="text-sm text-gray-400 py-2">{emptyMessage}</p>
+        emptyMessage ? <p className="text-sm text-gray-400 py-2">{emptyMessage}</p> : null
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {people.map((person) => <MemberCard key={person.id} member={person} />)}

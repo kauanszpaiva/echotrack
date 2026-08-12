@@ -26,6 +26,13 @@ export const ROLE_BADGE: Record<UserRole, { bg: string; text: string; border: st
   PSM:             { bg: 'bg-sky-50',     text: 'text-sky-600',     border: 'border-sky-200',     label: 'PSM' },
   STUDENT:         { bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200', label: 'Student' },
   INTERN:          { bg: 'bg-teal-50',    text: 'text-teal-600',    border: 'border-teal-200',    label: 'Intern' },
+
+  // Placement-side and site staff.
+  CORPORATE_ENGAGEMENT_MANAGER:   { bg: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-indigo-200', label: 'Corporate Engagement' },
+  INTERNSHIP_SERVICES_SPECIALIST: { bg: 'bg-violet-50', text: 'text-violet-600', border: 'border-violet-200', label: 'Internship Services' },
+  SITE_OPERATIONS:                { bg: 'bg-slate-50',  text: 'text-slate-600',  border: 'border-slate-200',  label: 'Site Operations' },
+  STUDENT_SERVICES:               { bg: 'bg-rose-50',   text: 'text-rose-600',   border: 'border-rose-200',   label: 'Student Services' },
+  DEVELOPMENT_FINANCE:            { bg: 'bg-amber-50',  text: 'text-amber-600',  border: 'border-amber-200',  label: 'Development & Finance' },
 };
 
 export interface SessionUser {

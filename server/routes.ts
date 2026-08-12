@@ -567,7 +567,9 @@ router.get('/dashboard-redirect', authMiddleware, (req: AuthRequest, res) => {
         case 'PSM': return res.redirect('/coach');
         case 'STUDENT': return res.redirect('/student');
         case 'INTERN': return res.redirect('/student');
-        default: return res.redirect('/');
+        // Placement and site staff have no dashboard of their own yet; their
+        // profile is the one page they can always reach.
+        default: return res.redirect('/profile');
     }
 });
 
@@ -669,7 +671,14 @@ router.post('/admin/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'P
         
         let newRole = role || 'PROGRAM_MANAGER';
         if (isAdminLevel(req.user.role)) {
-            if (!['PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'INTERN'].includes(newRole)) {
+            // Placement and site roles carry no permissions of their own — see
+            // the note in shared/roles.ts before granting them any.
+            const adminCreatable = [
+                'PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'INTERN',
+                'CORPORATE_ENGAGEMENT_MANAGER', 'INTERNSHIP_SERVICES_SPECIALIST',
+                'SITE_OPERATIONS', 'STUDENT_SERVICES', 'DEVELOPMENT_FINANCE',
+            ];
+            if (!adminCreatable.includes(newRole)) {
                 return res.status(400).json({ error: 'Invalid staff role' });
             }
         } else {

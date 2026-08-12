@@ -44,7 +44,9 @@ function DashboardRedirect() {
       case 'PSM': navigate('/coach'); break;
       case 'STUDENT': navigate('/student'); break;
       case 'INTERN': navigate('/student'); break;
-      default: navigate('/login'); break;
+      // Placement and site staff have no dashboard of their own yet. Sending
+      // them to /login would bounce an authenticated user in a loop.
+      default: navigate('/profile'); break;
     }
   }, [user, loading, navigate]);
 

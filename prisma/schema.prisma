@@ -73,17 +73,38 @@ model ConductEntry {
   @@map("conduct_entries")
 }
 
+/// One intake cycle. A cohort is split into learning communities — two per
+/// cycle — each led by its own Program Manager. `Community` below is a learning
+/// community, not a cohort; students belong to one of them.
+model Cohort {
+  id          String    @id @default(cuid())
+  name        String
+  startDate   DateTime? @map("start_date")
+  endDate     DateTime? @map("end_date")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  communities Community[]
+
+  @@map("cohorts")
+}
+
+/// A learning community (40–60 students) led by a Program Manager.
 model Community {
   id               String   @id @default(cuid())
   name             String
   description      String?
   programManagerId String?  @map("program_manager_id")
+  /// Null for learning communities created before cohorts were tracked.
+  cohortId         String?  @map("cohort_id")
   isActive         Boolean  @default(true) @map("is_active")
   createdAt        DateTime @default(now()) @map("created_at")
 
   programManager  User?            @relation("PMCommunities", fields: [programManagerId], references: [id], onDelete: SetNull)
+  cohort          Cohort?          @relation(fields: [cohortId], references: [id], onDelete: SetNull)
   studentProfiles StudentProfile[]
 
+  @@index([cohortId])
   @@map("communities")
 }
 

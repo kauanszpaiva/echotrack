@@ -2,7 +2,10 @@ import { Router } from 'express';
 import type { Prisma } from '@prisma/client';
 import { authMiddleware, AuthRequest } from './auth.js';
 import prisma from './prisma.js';
-import { isAdminLevel, isCoachLevel, STUDENT_LEVEL } from '../shared/roles.js';
+import {
+  isAdminLevel, isCoachLevel, STUDENT_LEVEL,
+  STAFF_FUNCTIONS, STAFF_FUNCTION_ROLES,
+} from '../shared/roles.js';
 import { generateResumePdf } from './exports.js';
 
 const router = Router();
@@ -162,7 +165,30 @@ async function communityIdsForUser(userId: string, role: string): Promise<string
 }
 
 /**
- * The staff attached to a set of cohorts — the mirror of the rule above: the
+ * The rest of the cohort: the learning communities that share a cohort with the
+ * ones given, excluding those themselves. A cohort runs two learning
+ * communities per cycle, so this is normally the single sibling LC. Learning
+ * communities not yet assigned to a cohort simply have no siblings.
+ */
+async function cohortSiblingCommunityIds(communityIds: string[]): Promise<string[]> {
+  if (!communityIds.length) return [];
+
+  const homes = await prisma.community.findMany({
+    where: { id: { in: communityIds } },
+    select: { cohortId: true },
+  });
+  const cohortIds = [...new Set(homes.map((c) => c.cohortId).filter(Boolean))] as string[];
+  if (!cohortIds.length) return [];
+
+  const siblings = await prisma.community.findMany({
+    where: { cohortId: { in: cohortIds }, id: { notIn: communityIds }, isActive: true },
+    select: { id: true },
+  });
+  return siblings.map((community) => community.id);
+}
+
+/**
+ * The staff attached to a set of learning communities — the mirror of the rule above: the
  * program managers who run them, the coaches assigned to their students, and
  * the instructors teaching the classes those students take.
  */
@@ -205,7 +231,12 @@ async function staffIdsForCommunities(communityIds: string[]): Promise<string[]>
  * access control; these extra titles are display-only and derived from the work
  * the person actually does, so they never drift from the relational data.
  */
-const TITLE_ORDER = ['PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'ADMIN', 'DEV', 'STUDENT', 'INTERN'];
+const TITLE_ORDER = [
+  'PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR',
+  'CORPORATE_ENGAGEMENT_MANAGER', 'INTERNSHIP_SERVICES_SPECIALIST',
+  'SITE_OPERATIONS', 'STUDENT_SERVICES', 'DEVELOPMENT_FINANCE',
+  'ADMIN', 'DEV', 'STUDENT', 'INTERN',
+];
 
 function titlesForUser(user: any): string[] {
   const titles = new Set<string>();
@@ -259,10 +290,6 @@ const MEMBER_SELECT: Prisma.UserSelect = {
     },
   },
 };
-
-/** Roles that make up the staff grouping in the directory. Admins are omitted:
- * they administer cohorts rather than belong to them. */
-const STAFF_ROLES = ['PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR'];
 
 /** The member fields plus the profile preview each directory card renders. */
 const DIRECTORY_SELECT: Prisma.UserSelect = {
@@ -338,20 +365,30 @@ router.get('/profiles/directory', authMiddleware, async (req: AuthRequest, res) 
     const search = optionalText(req.query.q, 'q', 120);
     const admin = isAdminLevel(req.user.role);
 
-    // Members are pinned to the cohorts they belong to; admins may browse any.
+    // Members are pinned to the learning communities they belong to; admins may
+    // browse any.
     const own = admin ? [] : await communityIdsForUser(req.user.id, req.user.role);
-    let communityIds: string[];
+    let homeIds: string[];
     if (admin) {
-      communityIds = requested ? [requested] : [];
+      homeIds = requested ? [requested] : [];
     } else {
       if (requested && !own.includes(requested)) {
-        return res.status(403).json({ error: 'You can only browse your own community' });
+        return res.status(403).json({ error: 'You can only browse your own learning community' });
       }
-      communityIds = requested ? [requested] : own;
-      if (communityIds.length === 0) {
-        return res.json({ members: [], staff: [], communities: [], communityId: null });
+      homeIds = requested ? [requested] : own;
+      if (homeIds.length === 0) {
+        return res.json({
+          cohort: null, communityId: null, communities: [],
+          members: [], peers: [], staff: [],
+        });
       }
     }
+
+    // The rest of the cohort: the sibling learning community (there are two per
+    // cycle). Staff are resolved across the whole cohort, since placement and
+    // site staff serve the intake rather than a single learning community.
+    const peerIds = await cohortSiblingCommunityIds(homeIds);
+    const cohortIds = [...homeIds, ...peerIds];
 
     // Everyone listed must be an active account that has opted into the directory.
     const listable: Prisma.UserWhereInput = {
@@ -361,14 +398,14 @@ router.get('/profiles/directory', authMiddleware, async (req: AuthRequest, res) 
       ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
     };
 
-    const staffIds = communityIds.length ? await staffIdsForCommunities(communityIds) : [];
+    const staffIds = cohortIds.length ? await staffIdsForCommunities(cohortIds) : [];
 
-    const [members, staff] = await Promise.all([
+    const studentsIn = (communityIds: string[]) =>
       prisma.user.findMany({
         where: {
           ...listable,
-          // With a cohort selected, only students carry a community; without one
-          // (admins browsing everything) fall back to the student roles.
+          // With a learning community selected, only students carry one; without
+          // one (admins browsing everything) fall back to the student roles.
           ...(communityIds.length
             ? { studentProfile: { communityId: { in: communityIds } } }
             : { role: { in: STUDENT_LEVEL } }),
@@ -376,11 +413,15 @@ router.get('/profiles/directory', authMiddleware, async (req: AuthRequest, res) 
         select: DIRECTORY_SELECT,
         orderBy: { name: 'asc' },
         take: 200,
-      }),
+      });
+
+    const [members, peers, staff] = await Promise.all([
+      studentsIn(homeIds),
+      peerIds.length ? studentsIn(peerIds) : Promise.resolve([]),
       prisma.user.findMany({
         where: {
           ...listable,
-          ...(communityIds.length ? { id: { in: staffIds } } : { role: { in: STAFF_ROLES } }),
+          ...(cohortIds.length ? { id: { in: staffIds } } : { role: { in: STAFF_FUNCTION_ROLES } }),
         },
         select: DIRECTORY_SELECT,
         orderBy: { name: 'asc' },
@@ -388,24 +429,37 @@ router.get('/profiles/directory', authMiddleware, async (req: AuthRequest, res) 
       }),
     ]);
 
-    // Admins get the full picker; members only ever see their own cohorts.
-    const communities = admin
-      ? await prisma.community.findMany({
-          where: { isActive: true },
-          select: { id: true, name: true },
-          orderBy: { name: 'asc' },
+    // Admins get the full picker; members only ever see their own communities.
+    const communities = await prisma.community.findMany({
+      where: admin ? { isActive: true } : { id: { in: own } },
+      select: { id: true, name: true, cohort: { select: { id: true, name: true } } },
+      orderBy: { name: 'asc' },
+    });
+
+    // Group staff by operating function, dropping functions nobody fills.
+    const staffEntries = staff.map(serialiseDirectoryEntry);
+    const staffGroups = STAFF_FUNCTIONS.map((fn) => ({
+      key: fn.key,
+      label: fn.label,
+      description: fn.description,
+      people: staffEntries.filter((person: any) => fn.roles.includes(person.role)),
+    })).filter((group) => group.people.length > 0);
+
+    const home = homeIds.length
+      ? await prisma.community.findUnique({
+          where: { id: homeIds[0] },
+          select: { id: true, name: true, cohort: { select: { id: true, name: true } } },
         })
-      : await prisma.community.findMany({
-          where: { id: { in: own } },
-          select: { id: true, name: true },
-          orderBy: { name: 'asc' },
-        });
+      : null;
 
     res.json({
-      communityId: communityIds[0] ?? null,
+      cohort: home?.cohort ?? null,
+      communityId: home?.id ?? null,
+      communityName: home?.name ?? null,
       communities,
       members: members.map(serialiseDirectoryEntry),
-      staff: staff.map(serialiseDirectoryEntry),
+      peers: peers.map(serialiseDirectoryEntry),
+      staff: staffGroups,
     });
   } catch (e: any) {
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Failed to load the directory' });
