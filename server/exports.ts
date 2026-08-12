@@ -1,7 +1,15 @@
-import React from 'react';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle } from 'docx';
+import { createElement } from 'react';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import { renderToStream } from '@react-pdf/renderer';
-import { Document as PdfDocument, Page as PdfPage, Text as PdfText, View as PdfView, StyleSheet } from '@react-pdf/renderer';
+import { Document as PdfDocument, Page as PdfPage, Text as PdfText, StyleSheet } from '@react-pdf/renderer';
+
+// This module is deliberately JSX-free and lives in a `.ts` file, not `.tsx`.
+// Vercel's Node builder compiles the `.ts` files it traces into the serverless
+// bundle but skips `.tsx`, so as `exports.tsx` this file never reached the
+// lambda: `import './exports.js'` in routes.ts then threw ERR_MODULE_NOT_FOUND
+// at module load, killing the whole function. Every /api/* route — health check
+// included — answered with Vercel's plain-text FUNCTION_INVOCATION_FAILED page
+// rather than JSON. Keep the PDF tree built with createElement.
 
 export async function generateDocx(report: any): Promise<Buffer> {
     const doc = new Document({
@@ -72,30 +80,33 @@ const styles = StyleSheet.create({
   bold: { fontWeight: 'bold' }
 });
 
-export const ReportPdf = ({ report }: { report: any }) => (
-  <PdfDocument>
-    <PdfPage size="A4" style={styles.page}>
-      <PdfText style={styles.heading}>Weekly Status Report</PdfText>
-      <PdfText style={styles.subheading}>EchoTrack / KSP Dominion Group</PdfText>
+export const ReportPdf = ({ report }: { report: any }) =>
+  createElement(
+    PdfDocument,
+    null,
+    createElement(
+      PdfPage,
+      { size: 'A4', style: styles.page },
+      createElement(PdfText, { style: styles.heading }, 'Weekly Status Report'),
+      createElement(PdfText, { style: styles.subheading }, 'EchoTrack / KSP Dominion Group'),
 
-      <PdfText style={styles.text}>Good afternoon,</PdfText>
-      <PdfText style={styles.text}>I am eager to chat with you about {report.weeklyTopic}.</PdfText>
-      
-      <PdfText style={styles.sectionTitle}>Highlights</PdfText>
-      <PdfText style={styles.text}>{report.highlights}</PdfText>
-      
-      <PdfText style={styles.sectionTitle}>Class Experience</PdfText>
-      <PdfText style={styles.text}>{report.classExperience}</PdfText>
-      
-      <PdfText style={styles.sectionTitle}>In Closing</PdfText>
-      <PdfText style={styles.text}>{report.reflection}</PdfText>
-      
-      <PdfText style={styles.text}>{'\n'}Name: {report.student?.name}</PdfText>
-      <PdfText style={styles.text}>Email: {report.student?.email}</PdfText>
-    </PdfPage>
-  </PdfDocument>
-);
+      createElement(PdfText, { style: styles.text }, 'Good afternoon,'),
+      createElement(PdfText, { style: styles.text }, `I am eager to chat with you about ${report.weeklyTopic}.`),
+
+      createElement(PdfText, { style: styles.sectionTitle }, 'Highlights'),
+      createElement(PdfText, { style: styles.text }, report.highlights),
+
+      createElement(PdfText, { style: styles.sectionTitle }, 'Class Experience'),
+      createElement(PdfText, { style: styles.text }, report.classExperience),
+
+      createElement(PdfText, { style: styles.sectionTitle }, 'In Closing'),
+      createElement(PdfText, { style: styles.text }, report.reflection),
+
+      createElement(PdfText, { style: styles.text }, `\nName: ${report.student?.name}`),
+      createElement(PdfText, { style: styles.text }, `Email: ${report.student?.email}`)
+    )
+  );
 
 export async function generatePdf(report: any) {
-  return await renderToStream(<ReportPdf report={report} />);
+  return await renderToStream(createElement(ReportPdf, { report }));
 }

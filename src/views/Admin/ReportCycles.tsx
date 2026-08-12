@@ -65,15 +65,15 @@ export function ReportCycles() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
           <h1 className="text-2xl font-black font-display tracking-tight text-[#0A0A0A]">Report Cycles</h1>
           <p className="text-[#6B7280] text-xs uppercase tracking-widest mt-1">Manage Submission Windows</p>
         </div>
       </div>
       
-      <div className="flex gap-6">
-         <Card className="p-6 w-1/3 h-fit sticky top-24 border-[#E5E7EB]">
+      <div className="flex flex-col lg:flex-row gap-6">
+         <Card className="p-6 w-full lg:w-1/3 h-fit lg:sticky lg:top-24 border-[#E5E7EB]">
              <h2 className="font-bold text-sm mb-4">Add Open Cycle</h2>
              <form onSubmit={handleCreate} className="space-y-4">
                  <Input label="Cycle Name (e.g. Week 1)" value={name} onChange={setName} required />
@@ -90,9 +90,9 @@ export function ReportCycles() {
              </form>
          </Card>
       
-         <div className="flex-1 space-y-4">
+         <div className="flex-1 min-w-0 space-y-4">
             {cycles.map(c => (
-                <Card key={c.id} className={`p-5 flex justify-between items-center transition-shadow border-l-4 ${c.status === 'OPEN' ? 'border-l-emerald-500 hover:shadow-md' : 'border-l-gray-300'}`}>
+                <Card key={c.id} className={`p-5 flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center transition-shadow border-l-4 ${c.status === 'OPEN' ? 'border-l-emerald-500 hover:shadow-md' : 'border-l-gray-300'}`}>
                     <div>
                         <div className="flex items-center gap-3">
                            <h3 className="font-bold text-[#0A0A0A]">{c.name}</h3>

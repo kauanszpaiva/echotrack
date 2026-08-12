@@ -38,7 +38,7 @@ export function AdminDashboard() {
     <div className="space-y-8 pb-20">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Admin Dashboard</h1>
+          <h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Admin Dashboard</h1>
           <p className="text-[#6B7280] text-sm mt-1 uppercase tracking-widest font-bold">Executive Reporting Overview</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 bg-[#FF7A00]/10 border border-[#FF7A00]/20 rounded-full">
@@ -106,7 +106,7 @@ export function AdminDashboard() {
 
       {/* Visual Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-         <Card className="p-8">
+         <Card className="p-5 sm:p-8">
             <h3 className="font-bold text-sm text-[#0A0A0A] border-b border-[#E5E7EB] pb-4 mb-8 flex items-center gap-2">
                 <Target className="w-4 h-4 text-blue-500" />
                 Class Performance Distribution
@@ -150,7 +150,7 @@ export function AdminDashboard() {
             </div>
          </Card>
          
-         <Card className="p-8">
+         <Card className="p-5 sm:p-8">
             <h3 className="font-bold text-sm text-[#0A0A0A] border-b border-[#E5E7EB] pb-4 mb-8 flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-[#FF7A00]" />
                 Daily Submission Volume (7 Days)
@@ -188,7 +188,7 @@ export function AdminDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-         <Card className="p-8 group hover:border-blue-200 transition-colors">
+         <Card className="p-5 sm:p-8 group hover:border-blue-200 transition-colors">
             <h3 className="font-bold text-xs uppercase tracking-widest text-[#6B7280] mb-4 flex items-center justify-between">
                 Staffing Overview
                 <Users className="w-4 h-4 text-blue-500 opacity-20 group-hover:opacity-100 transition-opacity" />
@@ -196,7 +196,7 @@ export function AdminDashboard() {
             <p className="text-4xl font-black tracking-tighter text-gray-900">{data.totalStaff || 0}</p>
             <p className="text-xs text-gray-400 mt-2 font-medium">Active Program Managers & Coaches</p>
          </Card>
-         <Card className="p-8 group hover:border-[#FF7A00]/20 transition-colors">
+         <Card className="p-5 sm:p-8 group hover:border-[#FF7A00]/20 transition-colors">
             <h3 className="font-bold text-xs uppercase tracking-widest text-[#6B7280] mb-4 flex items-center justify-between">
                 Academic Scope
                 <BookOpen className="w-4 h-4 text-[#FF7A00] opacity-20 group-hover:opacity-100 transition-opacity" />
@@ -204,7 +204,7 @@ export function AdminDashboard() {
             <p className="text-4xl font-black tracking-tighter text-gray-900">{data.totalClasses || 0}</p>
             <p className="text-xs text-gray-400 mt-2 font-medium">Mapped Classes across all Pathways</p>
          </Card>
-         <Card className="p-8 group hover:border-purple-200 transition-colors">
+         <Card className="p-5 sm:p-8 group hover:border-purple-200 transition-colors">
             <h3 className="font-bold text-xs uppercase tracking-widest text-[#6B7280] mb-4 flex items-center justify-between">
                 Communities
                 <Activity className="w-4 h-4 text-purple-500 opacity-20 group-hover:opacity-100 transition-opacity" />
@@ -214,10 +214,10 @@ export function AdminDashboard() {
          </Card>
       </div>
       
-      <Card className="p-8">
-         <div className="flex items-center justify-between border-b border-[#E5E7EB] pb-6 mb-6">
+      <Card className="p-5 sm:p-8">
+         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E5E7EB] pb-6 mb-6">
             <h3 className="font-bold text-lg text-gray-900 flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-[#FF7A00]" />
+                <Sparkles className="w-5 h-5 shrink-0 text-[#FF7A00]" />
                 Recent System Activity
             </h3>
             <Button variant="outline" size="sm" className="text-[10px] font-bold uppercase tracking-widest">View Audit Logs</Button>
@@ -232,12 +232,12 @@ export function AdminDashboard() {
                     className="flex items-start gap-4 p-4 hover:bg-gray-50 rounded-2xl transition-colors border border-transparent hover:border-gray-100"
                  >
                     <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 shrink-0" />
-                    <div>
-                        <div className="flex items-center gap-2 mb-1">
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1">
                             <span className="font-bold text-sm text-gray-900">{log.action}</span>
                             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{new Date(log.createdAt).toLocaleString()}</span>
                         </div>
-                        <p className="text-xs text-gray-500 leading-relaxed">{log.description}</p>
+                        <p className="text-xs text-gray-500 leading-relaxed break-words">{log.description}</p>
                     </div>
                  </motion.div>
              )) : (

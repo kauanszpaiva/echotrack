@@ -47,7 +47,7 @@ export function Forbidden() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-[#FAFAFA] px-6">
-      <div className="max-w-md w-full bg-white border border-[#E5E7EB] rounded-2xl p-8 text-center">
+      <div className="max-w-md w-full bg-white border border-[#E5E7EB] rounded-2xl p-5 sm:p-8 text-center">
         <div className="w-12 h-12 rounded-xl bg-[#FEF2F2] text-[#DC2626] flex items-center justify-center mx-auto mb-4">
           <ShieldAlert className="w-6 h-6" />
         </div>

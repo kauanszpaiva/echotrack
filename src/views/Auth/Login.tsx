@@ -137,7 +137,7 @@ export function Login() {
             <p className="text-xs uppercase tracking-[0.2em] font-bold text-[#FF7A00] mt-2">KSP Dominion Group</p>
           </div>
 
-          <Card className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+          <Card className="bg-white p-5 sm:p-8 rounded-2xl border border-gray-100 shadow-sm">
             <h2 className="text-xl font-bold text-[#0A0A0A] mb-1">Sign in to your account</h2>
             <p className="text-sm text-gray-500 mb-6">Welcome back. Enter your credentials to continue.</p>
 

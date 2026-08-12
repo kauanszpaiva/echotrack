@@ -62,7 +62,7 @@ export function SetupAccount() {
           <p className="text-xs font-bold text-[#6B7280] uppercase tracking-widest mt-1">Echotrack Registration</p>
         </div>
         
-        <Card className="p-8 bg-white">
+        <Card className="p-5 sm:p-8 bg-white">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-4">
               <Input 

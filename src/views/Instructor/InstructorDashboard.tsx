@@ -42,7 +42,7 @@ export function InstructorDashboard() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Instructor Dashboard</h1>
+        <h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Instructor Dashboard</h1>
         <p className="text-[#6B7280] text-sm mt-1">Monitor your classes and student feedback.</p>
       </div>
 
