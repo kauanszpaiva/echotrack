@@ -41,7 +41,7 @@ function DashboardRedirect() {
       case 'PROGRAM_MANAGER': navigate('/pm'); break;
       case 'INSTRUCTOR': navigate('/instructor'); break;
       case 'COACH': navigate('/coach'); break;
-      case 'PSM': navigate('/coach'); break;
+      case 'PSM': navigate('/psm'); break;
       case 'STUDENT': navigate('/student'); break;
       case 'INTERN': navigate('/student'); break;
       // Placement and site staff have no dashboard of their own yet. Sending
@@ -61,6 +61,8 @@ import { InstructorDashboard } from './views/Instructor/InstructorDashboard';
 import { ReportDetail } from './views/Admin/ReportDetail';
 import { ConductTracker } from './views/Conduct/ConductTracker';
 import { MemberProfile } from './views/Profile/MemberProfile';
+import { PSMDashboard } from './views/PSM/PSMDashboard';
+import { StudentTimesheet } from './views/Student/StudentTimesheet';
 import { MemberDirectory } from './views/Profile/MemberDirectory';
 
 export default function App() {
@@ -102,6 +104,7 @@ export default function App() {
           <Route path="/pm/reports/:id" element={<ReportDetail />} />
           
           <Route path="/coach" element={<CoachDashboard />} />
+          <Route path="/psm" element={<PSMDashboard />} />
           <Route path="/coach/reports/:id" element={<ReportDetail />} />
           
           <Route path="/instructor" element={<InstructorDashboard />} />
@@ -110,6 +113,7 @@ export default function App() {
 
           <Route path="/student" element={<StudentDashboard />} />
           <Route path="/student/report" element={<StudentReportWizard />} />
+          <Route path="/student/timesheet" element={<StudentTimesheet />} />
           <Route path="/student/reports/:id" element={<ReportDetail />} />
         </Route>
       </Routes>

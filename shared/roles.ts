@@ -28,7 +28,15 @@ export type UserRole = (typeof ROLES)[keyof typeof ROLES];
 export const ALL_ROLES: UserRole[] = Object.values(ROLES);
 
 // ── Permission groups ───────────────────────────────────────────────────────
-// DEV mirrors ADMIN, PSM mirrors COACH, INTERN mirrors STUDENT.
+// DEV mirrors ADMIN, INTERN mirrors STUDENT.
+//
+// A Placement Success Manager sits under Corporate Engagement and owns the
+// employer relationship through Phase 2 — but the same person can also coach a
+// caseload. Because `User.role` holds a single value, staff access to a given
+// student follows the ASSIGNMENT (StudentProfile.coachId / .psmId /
+// .programManagerId), never the role label. See servesStudent in
+// server/phaseRouting.ts. COACH_LEVEL below answers a different question — who
+// may be assigned as a student's coach — and PSMs qualify.
 export const ADMIN_LEVEL: UserRole[] = ['ADMIN', 'DEV'];
 export const COACH_LEVEL: UserRole[] = ['COACH', 'PSM'];
 export const STUDENT_LEVEL: UserRole[] = ['STUDENT', 'INTERN'];
@@ -37,8 +45,12 @@ export const STAFF_MANAGE: UserRole[] = ['ADMIN', 'DEV', 'PROGRAM_MANAGER'];
 export function isAdminLevel(role?: string | null): boolean {
   return role === 'ADMIN' || role === 'DEV';
 }
+/** Eligible to be assigned as a student's coach. Not a permission check. */
 export function isCoachLevel(role?: string | null): boolean {
   return role === 'COACH' || role === 'PSM';
+}
+export function isPsm(role?: string | null): boolean {
+  return role === 'PSM';
 }
 export function isStudentLevel(role?: string | null): boolean {
   return role === 'STUDENT' || role === 'INTERN';
@@ -52,8 +64,11 @@ export function isStudentLevel(role?: string | null): boolean {
 export function expandRoles(roles: string[]): string[] {
   const set = new Set(roles);
   if (set.has('ADMIN')) set.add('DEV');
-  if (set.has('COACH')) set.add('PSM');
   if (set.has('STUDENT')) set.add('INTERN');
+  // COACH no longer implies PSM. The coach and PSM surfaces list both roles
+  // explicitly and scope their data by assignment, so someone who wears both
+  // hats sees their coached students in one and their placed students in the
+  // other — and nobody sees a caseload they were not assigned.
   return [...set];
 }
 
@@ -77,9 +92,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
  * How staff roles group into the four operating functions of a site. Used to
  * organise the member directory; it carries no authority of its own.
  *
- * PSM sits under placement because that is the job — but note it is still in
- * COACH_LEVEL above, so PSMs retain coach-level access to their students. That
- * pairing is intentional until someone confirms PSMs should lose it.
+ * PSM sits under placement because that is the job: the Corporate Engagement
+ * umbrella, owning the employer relationship through Phase 2.
  */
 export const STAFF_FUNCTIONS: { key: string; label: string; description: string; roles: UserRole[] }[] = [
   {

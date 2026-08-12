@@ -34,9 +34,14 @@ model User {
   memberProfile            MemberProfile?
   classesTaught            ClassModel[]       @relation("InstructorClasses")
   assignedStudents         StudentProfile[]   @relation("CoachStudents")
+  psmStudents              StudentProfile[]   @relation("PsmStudents")
   pmStudents               StudentProfile[]   @relation("PMStudents")
   managedCommunities       Community[]        @relation("PMCommunities")
   weeklyReports            WeeklyReport[]
+  reportsReceived          WeeklyReport[]     @relation("ReportRecipient")
+  timesheets               Timesheet[]        @relation("TimesheetStudent")
+  timesheetsReceived       Timesheet[]        @relation("TimesheetRecipient")
+  timesheetsReviewed       Timesheet[]        @relation("TimesheetReviewer")
   coachFeedbacks           CoachFeedback[]
   targetedQuestionsCreated TargetedQuestion[] @relation("CreatedByStaff")
   targetedAnswers          TargetedAnswer[]
@@ -144,6 +149,9 @@ model StudentProfile {
   id               String   @id @default(cuid())
   userId           String   @unique @map("user_id")
   coachId          String?  @map("coach_id")
+  /// Placement Success Manager. Phase 2 weekly reports and timesheets route
+  /// here instead of to the coach; the coach keeps contact either way.
+  psmId            String?  @map("psm_id")
   programManagerId String?  @map("program_manager_id")
   communityId      String?  @map("community_id")
   pathwayId        String?  @map("pathway_id")
@@ -154,6 +162,7 @@ model StudentProfile {
 
   user             User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   coach            User?                    @relation("CoachStudents", fields: [coachId], references: [id], onDelete: SetNull)
+  psm              User?                    @relation("PsmStudents", fields: [psmId], references: [id], onDelete: SetNull)
   programManager   User?                    @relation("PMStudents", fields: [programManagerId], references: [id], onDelete: SetNull)
   community        Community?               @relation(fields: [communityId], references: [id], onDelete: SetNull)
   pathway          Pathway?                 @relation(fields: [pathwayId], references: [id], onDelete: SetNull)
@@ -290,6 +299,7 @@ model ReportCycle {
 
   pathway           Pathway?           @relation(fields: [pathwayId], references: [id], onDelete: SetNull)
   weeklyReports     WeeklyReport[]
+  timesheets        Timesheet[]
   targetedQuestions TargetedQuestion[]
 
   @@map("report_cycles")
@@ -301,6 +311,12 @@ model WeeklyReport {
   cycleId     String    @map("cycle_id")
   status      String    @default("DRAFT")
   submittedAt DateTime? @map("submitted_at")
+
+  /// PHASE_1 | PHASE_2, stamped at submission so the routing stays auditable
+  /// even after the student moves into the next phase.
+  phase       String?   @map("phase")
+  /// Who the report was sent to: the coach in Phase 1, the PSM in Phase 2.
+  recipientId String?   @map("recipient_id")
 
   energy     Int? @default(5)
   mood       Int? @default(5)
@@ -325,6 +341,7 @@ model WeeklyReport {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student         User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  recipient       User?            @relation("ReportRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
   cycle           ReportCycle      @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   classRatings    ClassRating[]
   coachFeedback   CoachFeedback[]
@@ -334,6 +351,51 @@ model WeeklyReport {
   @@index([studentId])
   @@index([cycleId])
   @@map("weekly_reports")
+}
+
+/// Phase 2 (internship) only. Students log their internship hours each cycle and
+/// submit them to their PSM alongside the weekly status report.
+model Timesheet {
+  id          String    @id @default(cuid())
+  studentId   String    @map("student_id")
+  cycleId     String    @map("cycle_id")
+  status      String    @default("DRAFT")
+  /// Denormalised sum of the entries, recomputed server-side on every save.
+  totalHours  Float     @default(0) @map("total_hours")
+  notes       String?
+  submittedAt DateTime? @map("submitted_at")
+
+  /// The PSM the timesheet was submitted to.
+  recipientId String?   @map("recipient_id")
+  reviewedById String?  @map("reviewed_by_id")
+  reviewedAt  DateTime? @map("reviewed_at")
+  reviewNote  String?   @map("review_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  student    User            @relation("TimesheetStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  recipient  User?           @relation("TimesheetRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
+  reviewedBy User?           @relation("TimesheetReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  cycle      ReportCycle     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  entries    TimesheetEntry[]
+
+  @@unique([studentId, cycleId])
+  @@index([recipientId, status])
+  @@map("timesheets")
+}
+
+model TimesheetEntry {
+  id          String   @id @default(cuid())
+  timesheetId String   @map("timesheet_id")
+  workDate    DateTime @map("work_date")
+  hours       Float
+  description String?
+
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+
+  @@index([timesheetId, workDate])
+  @@map("timesheet_entries")
 }
 
 model ClassRating {

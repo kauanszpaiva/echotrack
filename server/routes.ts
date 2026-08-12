@@ -7,6 +7,7 @@ import { JWT_SECRET } from './config.js';
 import prisma from './prisma.js';
 import { isAdminLevel, isCoachLevel, isStudentLevel, STUDENT_LEVEL, COACH_LEVEL } from '../shared/roles.js';
 import { provisionSupabaseAuthUser } from './supabaseAdmin.js';
+import { loadRoutingProfile, routingFor, servesStudent } from './phaseRouting.js';
 
 const router = Router();
 
@@ -379,9 +380,16 @@ router.post('/reports', authMiddleware, roleMiddleware(['STUDENT']), async (req,
             }
         }
 
+        // Phase 1 reports go to the coach, Phase 2 reports to the PSM. Stamp both
+        // on the row so the routing stays auditable once the student moves on.
+        const routingProfile = await loadRoutingProfile(studentId);
+        const routing = routingFor(routingProfile);
+
         const reportData = {
             status: requestedStatus,
             submittedAt: requestedStatus === 'SUBMITTED' ? new Date() : null,
+            phase: routing.phase,
+            recipientId: routing.recipientId,
             energy: optionalInt(payload.energy, 'energy', 1, 10, 5),
             mood: optionalInt(payload.mood, 'mood', 1, 10, 5),
             attendance: optionalInt(payload.attendance, 'attendance', 0, 100, 100),
@@ -602,7 +610,7 @@ router.get('/reports/export-docx', authMiddleware, async (req: any, res: any) =>
         let authorized = false;
         if (isAdminLevel(reqUser.role)) authorized = true;
         else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
-        else if (isCoachLevel(reqUser.role) && report.student.studentProfile?.coachId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
         else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
         else if (reqUser.role === 'INSTRUCTOR') {
              const enrollments = report.student.studentProfile?.classEnrollments || [];
@@ -639,7 +647,7 @@ router.get('/reports/export-pdf', authMiddleware, async (req: any, res: any) => 
         let authorized = false;
         if (isAdminLevel(reqUser.role)) authorized = true;
         else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
-        else if (isCoachLevel(reqUser.role) && report.student.studentProfile?.coachId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
         else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
         else if (reqUser.role === 'INSTRUCTOR') {
              const enrollments = report.student.studentProfile?.classEnrollments || [];
@@ -1350,7 +1358,7 @@ router.get('/reports/:id', authMiddleware, async (req: any, res: any) => {
         let authorized = false;
         if (isAdminLevel(reqUser.role)) authorized = true;
         else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
-        else if (isCoachLevel(reqUser.role) && report.student.studentProfile?.coachId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
         else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
         else if (reqUser.role === 'INSTRUCTOR') {
              const enrollments = report.student.studentProfile?.classEnrollments || [];
@@ -1381,7 +1389,7 @@ router.patch('/reports/:id/review', authMiddleware, roleMiddleware(['ADMIN', 'PR
         const reqUser = req.user;
         let authorized = false;
         if (isAdminLevel(reqUser.role)) authorized = true;
-        else if (isCoachLevel(reqUser.role) && report.student.studentProfile?.coachId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
         else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
 
         if (!authorized) return res.status(403).json({ error: 'Unauthorized to review this report' });
@@ -1413,7 +1421,7 @@ router.get('/admin/reports', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_M
     }
 });
 
-router.get('/coach/dashboard', authMiddleware, roleMiddleware(['COACH']), async (req, res) => {
+router.get('/coach/dashboard', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req, res) => {
     try {
         const students = await prisma.user.findMany({
             where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: (req as any).user?.id } },
@@ -1476,7 +1484,7 @@ router.get('/student/history', authMiddleware, roleMiddleware(['STUDENT']), asyn
 });
 
 // ======== COACH ========
-router.get('/coach/students', authMiddleware, roleMiddleware(['COACH']), async (req: any, res: any) => {
+router.get('/coach/students', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req: any, res: any) => {
     try {
         const students = await prisma.user.findMany({
             where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: req.user.id } },
@@ -1486,7 +1494,7 @@ router.get('/coach/students', authMiddleware, roleMiddleware(['COACH']), async (
     } catch(e) { res.status(500).json({ error: 'Server error' }); }
 });
 
-router.get('/coach/reports', authMiddleware, roleMiddleware(['COACH']), async (req: any, res: any) => {
+router.get('/coach/reports', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req: any, res: any) => {
     try {
         const reports = await prisma.weeklyReport.findMany({
             where: {
@@ -1500,7 +1508,7 @@ router.get('/coach/reports', authMiddleware, roleMiddleware(['COACH']), async (r
     } catch(e) { res.status(500).json({ error: 'Server error' }); }
 });
 
-router.get('/coach/alerts', authMiddleware, roleMiddleware(['COACH']), async (req: any, res: any) => {
+router.get('/coach/alerts', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req: any, res: any) => {
     try {
         const alerts = await prisma.alert.findMany({
             where: { resolved: false, student: { studentProfile: { coachId: req.user.id } } },
@@ -1522,7 +1530,7 @@ router.patch('/alerts/:id/resolve', authMiddleware, roleMiddleware(['ADMIN', 'PR
         const reqUser = req.user;
         let authorized = false;
         if (isAdminLevel(reqUser.role)) authorized = true;
-        else if (isCoachLevel(reqUser.role) && alertInfo.student.studentProfile?.coachId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, alertInfo.student.studentProfile)) authorized = true;
         else if (reqUser.role === 'PROGRAM_MANAGER' && alertInfo.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
         
         if (!authorized) return res.status(403).json({ error: 'Unauthorized to resolve this alert' });
@@ -1705,7 +1713,7 @@ router.post('/reports/:id/feedback', authMiddleware, roleMiddleware(['ADMIN', 'P
         const reqUser = req.user;
         let authorized = false;
         if (isAdminLevel(reqUser.role)) authorized = true;
-        else if (isCoachLevel(reqUser.role) && report.student.studentProfile?.coachId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
         else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
 
         if (!authorized) return res.status(403).json({ error: 'Unauthorized to give feedback on this report' });
@@ -1800,5 +1808,9 @@ router.patch('/conduct/:id', authMiddleware, roleMiddleware(['ADMIN']), async (r
 // Member profiles (LinkedIn-style work experience, education, skills, resume).
 import profileRoutes from './profileRoutes.js';
 router.use(profileRoutes);
+
+// PSM caseload and the Phase 2 timesheet flow.
+import psmRoutes from './psmRoutes.js';
+router.use(psmRoutes);
 
 export default router;

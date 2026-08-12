@@ -4,7 +4,8 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
-  GraduationCap, AlertTriangle, ShieldAlert, Award, Zap, UserRound, Contact
+  GraduationCap, AlertTriangle, ShieldAlert, Award, Zap, UserRound, Contact,
+  Briefcase, Clock
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
 import { ROLE_BADGE } from '../../types';
@@ -53,12 +54,16 @@ export function DashboardLayout() {
       { label: 'Dashboard',      href: '/instructor',          icon: LayoutDashboard },
       { label: 'Conduct Points', href: '/instructor/conduct',  icon: ShieldAlert }
     ];
+    // Coaching and placement are separate views of separate caseloads. Both are
+    // offered to either role, since one person can coach and also be a PSM.
     const coachItems = [
-      { label: 'Dashboard',    href: '/coach',          icon: LayoutDashboard }
+      { label: 'Coaching',       href: '/coach',           icon: LayoutDashboard },
+      { label: 'Placement',      href: '/psm',             icon: Briefcase }
     ];
     const studentItems = [
-      { label: 'Dashboard',      href: '/student',         icon: LayoutDashboard },
-      { label: 'Weekly Report',  href: '/student/report',  icon: FileText }
+      { label: 'Dashboard',      href: '/student',           icon: LayoutDashboard },
+      { label: 'Weekly Report',  href: '/student/report',    icon: FileText },
+      { label: 'Timesheet',      href: '/student/timesheet', icon: Clock }
     ];
 
     // Every member has a profile and can browse their cohort directory.
