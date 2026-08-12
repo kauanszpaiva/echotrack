@@ -64,7 +64,7 @@ export function StudentDashboard() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Welcome back, {user?.name?.split(' ')[0]}!</h1>
+        <h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Welcome back, {user?.name?.split(' ')[0]}!</h1>
         <p className="text-[#6B7280] text-sm mt-1">Here is your academic progress overview.</p>
       </div>
 
@@ -134,7 +134,7 @@ export function StudentDashboard() {
             />
          ) : (
            reports.map(r => (
-             <Card key={r.id} className="p-5 flex justify-between items-center transition-all hover:shadow-md">
+             <Card key={r.id} className="p-5 flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center transition-all hover:shadow-md">
                 <div className="flex items-center gap-4">
                    <div className="p-3 bg-[#F5F5F5] rounded-xl text-[#6B7280]">
                       <FileText className="w-6 h-6" />

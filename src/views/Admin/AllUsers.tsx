@@ -86,7 +86,7 @@ export function AllUsers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3">
         <div>
            <h1 className="text-2xl font-black font-display tracking-tight text-[#0A0A0A]">All Users</h1>
            <p className="text-[#6B7280] text-xs uppercase tracking-widest mt-1">Directory</p>
@@ -126,23 +126,28 @@ export function AllUsers() {
              </form>
           </Card>
 
-          <div className="flex-1 space-y-4">
-              <div className="flex gap-4 items-center bg-white p-2 rounded-xl shadow-sm border border-[#E5E7EB]">
-                 <div className="flex-1 flex items-center px-4">
-                   <Search className="w-4 h-4 text-[#9CA3AF] mr-2" />
-                   <input 
-                     className="w-full h-10 outline-none text-sm placeholder:text-[#9CA3AF]"
+          <div className="flex-1 min-w-0 space-y-4">
+              {/* Role filters used to be `hidden md:flex`, which left phone users
+                  with no way to filter at all. They now wrap onto their own line
+                  and scroll sideways instead of disappearing. */}
+              <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 bg-white p-2 rounded-xl shadow-sm border border-[#E5E7EB]">
+                 <div className="flex-1 flex items-center px-2 sm:px-4 min-w-0">
+                   <Search className="w-4 h-4 text-[#9CA3AF] mr-2 shrink-0" />
+                   <input
+                     className="w-full h-10 outline-none text-sm placeholder:text-[#9CA3AF] min-w-0"
                      placeholder="Search by name or email..."
                      value={search}
                      onChange={e => setSearch(e.target.value)}
                    />
                  </div>
-                 <div className="hidden md:flex bg-[#F5F5F5] rounded-lg p-1 overflow-x-auto">
+                 {/* `min-w-0` lets this shrink inside the flex row so the
+                     buttons scroll within it, rather than widening the page. */}
+                 <div className="flex bg-[#F5F5F5] rounded-lg p-1 overflow-x-auto min-w-0">
                     {roles.map(r => (
-                      <button 
+                      <button
                         key={r}
                         onClick={() => setFilter(r)}
-                        className={`whitespace-nowrap px-4 py-2 text-xs font-bold rounded-md transition-all ${filter === r ? 'bg-white shadow-sm text-[#0A0A0A]' : 'text-[#6B7280]'}`}
+                        className={`whitespace-nowrap px-3 sm:px-4 py-2 text-xs font-bold rounded-md transition-all ${filter === r ? 'bg-white shadow-sm text-[#0A0A0A]' : 'text-[#6B7280]'}`}
                       >
                         {r.replace('_', ' ')}
                       </button>
@@ -171,17 +176,17 @@ export function AllUsers() {
                 ) : (
                     filtered.map(u => (
                       <Card key={u.id} className="p-5 hover:shadow-md transition-shadow">
-                         <div className="flex justify-between items-start mb-4">
-                             <div className="flex items-center gap-4">
-                                 <div className="w-10 h-10 rounded-full bg-[#FFF4EB] text-[#FF7A00] flex items-center justify-center font-black text-lg">
+                         <div className="flex justify-between items-start gap-3 mb-4">
+                             <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                                 <div className="w-10 h-10 shrink-0 rounded-full bg-[#FFF4EB] text-[#FF7A00] flex items-center justify-center font-black text-lg">
                                    {u.name[0]?.toUpperCase()}
                                  </div>
-                                 <div>
-                                   <p className="font-bold text-[#0A0A0A]">{u.name}</p>
-                                   <p className="text-xs text-[#6B7280]">{u.email}</p>
+                                 <div className="min-w-0">
+                                   <p className="font-bold text-[#0A0A0A] truncate">{u.name}</p>
+                                   <p className="text-xs text-[#6B7280] truncate">{u.email}</p>
                                  </div>
                              </div>
-                             <Button variant="outline" className="text-[10px] h-7 px-2" onClick={() => handleToggleStatus(u.id, u.accountStatus)}>
+                             <Button variant="outline" className="text-[10px] h-7 px-2 shrink-0" onClick={() => handleToggleStatus(u.id, u.accountStatus)}>
                                 {u.accountStatus === 'ACTIVE' ? 'Deactivate' : 'Activate'}
                              </Button>
                          </div>

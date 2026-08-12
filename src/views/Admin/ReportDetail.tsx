@@ -156,7 +156,7 @@ export function ReportDetail() {
           </div>
 
           {/* Reflections */}
-          <Card className="p-8 space-y-6">
+          <Card className="p-5 sm:p-8 space-y-6">
              <div className="space-y-4">
                 <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 border-b pb-2 flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-[#FF7A00]" />

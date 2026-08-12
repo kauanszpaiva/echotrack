@@ -44,7 +44,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA] p-6">
-        <div className="max-w-lg w-full rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+        <div className="max-w-lg w-full rounded-2xl border border-gray-200 bg-white p-5 sm:p-8 shadow-sm">
           <div className="text-xs font-bold uppercase tracking-widest text-brand-orange mb-2">
             EchoTrack
           </div>

@@ -57,7 +57,7 @@ export function ConductTracker() {
 
   return <div className="max-w-7xl mx-auto space-y-6">
     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-      <div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#FF7A00]">Student conduct</p><h1 className="text-3xl font-black font-display tracking-tight">Infraction Points</h1><p className="text-sm text-gray-500 mt-1">Document incidents, conversations, and administrative decisions.</p></div>
+      <div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#FF7A00]">Student conduct</p><h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight">Infraction Points</h1><p className="text-sm text-gray-500 mt-1">Document incidents, conversations, and administrative decisions.</p></div>
       <button onClick={() => setShowForm(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0A0A0A] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#272727]"><Plus className="w-4 h-4" /> New entry</button>
     </div>
 
