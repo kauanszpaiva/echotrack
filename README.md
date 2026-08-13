@@ -20,6 +20,7 @@ Authentication is handled by **Clerk**; **Supabase Postgres** (via Prisma) is th
    `npm run db:deploy`
    *(Optional)* Seed a local admin (creates it in Clerk + Postgres):
    `CLERK_SECRET_KEY=sk_... DEV_ADMIN_PASSWORD=strong-pass NODE_ENV=development npm run db:seed`
+   *(Optional)* Add `DEV_SEED_PASSWORD=strong-pass` to also seed one login per role (Dev, Program Manager, Coach, PSM, Instructor, Student, Intern).
 
 ## Checks
 ```bash
