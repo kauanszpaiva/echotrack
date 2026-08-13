@@ -51,8 +51,67 @@ model User {
   conductEntriesAuthored   ConductEntry[]     @relation("ConductEntryAuthor")
   conductEntriesReviewed   ConductEntry[]     @relation("ConductEntryReviewer")
   conductEntriesReceived   ConductEntry[]     @relation("ConductEntryStudent")
+  performanceContract      PerformanceContract? @relation("StudentContract")
+  epicPlans                EpicPlan[]         @relation("EpicPlanStudent")
+  epicPlansOpened          EpicPlan[]         @relation("EpicPlanOpener")
+  epicPlansClosed          EpicPlan[]         @relation("EpicPlanCloser")
 
   @@map("users")
+}
+
+/// The binding Performance Contract a student enrols under. Points work like a
+/// professional standing "bank account": the contract opens with a pool (200 on
+/// most tracks, 150 on CX), weeks that meet expectations add to it, and approved
+/// ConductEntry infractions deduct from it. The balance is always derived — see
+/// contractStanding in shared/contract.ts — never stored, so it cannot drift
+/// from the conduct record behind it.
+model PerformanceContract {
+  id        String   @id @default(cuid())
+  studentId String   @unique @map("student_id")
+  /// IT | BUSINESS | CUSTOMER_EXPERIENCE — sets the opening pool and duration.
+  track     String
+  /// Weeks that met expectations, each worth the track's pointsPerWeek.
+  weeksMet  Int      @default(0) @map("weeks_met")
+  /// ACTIVE | EPIC | DISMISSED | COMPLETED
+  status    String   @default("ACTIVE")
+  signedAt  DateTime? @map("signed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  student User @relation("StudentContract", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("performance_contracts")
+}
+
+/// A Performance Improvement (EPIC) plan. Opened when a student's contract
+/// balance reaches the EPIC threshold, or when a PSM flags a workplace
+/// performance issue during Phase 2 — drafted with the Phase 1 Program Manager.
+model EpicPlan {
+  id           String    @id @default(cuid())
+  studentId    String    @map("student_id")
+  openedById   String    @map("opened_by_id")
+  /// OPEN | MET | NOT_MET | CANCELLED
+  status       String    @default("OPEN")
+  /// Why the plan was opened.
+  reason       String
+  /// What the student must do to return to good standing.
+  expectations String
+  /// Point balance when the plan was opened, kept for the record.
+  balanceAtOpen Int?     @map("balance_at_open")
+  reviewDate   DateTime? @map("review_date")
+  closedById   String?   @map("closed_by_id")
+  closedAt     DateTime? @map("closed_at")
+  outcomeNote  String?   @map("outcome_note")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  student  User  @relation("EpicPlanStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  openedBy User  @relation("EpicPlanOpener", fields: [openedById], references: [id], onDelete: Restrict)
+  closedBy User? @relation("EpicPlanCloser", fields: [closedById], references: [id], onDelete: SetNull)
+
+  @@index([studentId, status])
+  @@index([status])
+  @@map("epic_plans")
 }
 
 model ConductEntry {
@@ -520,6 +579,10 @@ model AppSettings {
   alertThresholdMood   Int      @default(3) @map("alert_threshold_mood")
   alertThresholdAttend Int      @default(70) @map("alert_threshold_attend")
   alertThresholdConf   Int      @default(3) @map("alert_threshold_conf")
+  /// Contract point balance at or above which a student keeps their stipend.
+  stipendPointThreshold Int     @default(150) @map("stipend_point_threshold")
+  /// Balance at or below which an EPIC (Performance Improvement) plan is flagged.
+  epicPointThreshold   Int      @default(120) @map("epic_point_threshold")
   outlookEnabled       Boolean  @default(false) @map("outlook_enabled")
   brightspaceEnabled   Boolean  @default(false) @map("brightspace_enabled")
   updatedAt            DateTime @updatedAt @map("updated_at")

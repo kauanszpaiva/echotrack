@@ -1813,4 +1813,8 @@ router.use(profileRoutes);
 import psmRoutes from './psmRoutes.js';
 router.use(psmRoutes);
 
+// Performance contract standing, point balances, and EPIC plans.
+import contractRoutes from './contractRoutes.js';
+router.use(contractRoutes);
+
 export default router;

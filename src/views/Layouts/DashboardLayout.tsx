@@ -63,7 +63,8 @@ export function DashboardLayout() {
     const studentItems = [
       { label: 'Dashboard',      href: '/student',           icon: LayoutDashboard },
       { label: 'Weekly Report',  href: '/student/report',    icon: FileText },
-      { label: 'Timesheet',      href: '/student/timesheet', icon: Clock }
+      { label: 'Timesheet',      href: '/student/timesheet', icon: Clock },
+      { label: 'My Standing',    href: '/student/standing',  icon: Award }
     ];
 
     // Every member has a profile and can browse their cohort directory.
