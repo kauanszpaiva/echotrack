@@ -202,6 +202,7 @@ async function staffIdsForCommunities(communityIds: string[]): Promise<string[]>
       where: { communityId: { in: communityIds } },
       select: {
         coachId: true,
+        psmId: true,
         programManagerId: true,
         classEnrollments: {
           where: { isActive: true },
@@ -217,6 +218,7 @@ async function staffIdsForCommunities(communityIds: string[]): Promise<string[]>
   }
   for (const profile of profiles) {
     if (profile.coachId) ids.add(profile.coachId);
+    if (profile.psmId) ids.add(profile.psmId);
     if (profile.programManagerId) ids.add(profile.programManagerId);
     for (const enrollment of profile.classEnrollments) {
       if (enrollment.classModel?.instructorId) ids.add(enrollment.classModel.instructorId);
@@ -224,6 +226,20 @@ async function staffIdsForCommunities(communityIds: string[]): Promise<string[]>
   }
   return [...ids];
 }
+
+/**
+ * Site staff serve the whole site rather than one cohort — corporate
+ * engagement, internship services, site operations, student services, and
+ * development & finance have no per-student relation to scope them by. They
+ * appear in every cohort directory, which is what "site staff" means.
+ */
+const SITE_WIDE_ROLES = [
+  'CORPORATE_ENGAGEMENT_MANAGER',
+  'INTERNSHIP_SERVICES_SPECIALIST',
+  'SITE_OPERATIONS',
+  'STUDENT_SERVICES',
+  'DEVELOPMENT_FINANCE',
+];
 
 /**
  * Someone can hold more than one title at once — a PSM who also coaches, or a
@@ -308,6 +324,68 @@ const DIRECTORY_SELECT: Prisma.UserSelect = {
     },
   },
 };
+
+/**
+ * Whether a viewer may read someone else's published profile.
+ *
+ * Publishing is presented as visibility within the member's cohort, so a direct
+ * read has to answer the same question the directory does: would this profile
+ * appear in a directory this viewer can open? Without this check any signed-in
+ * account could read any published member's email, biography, work history and
+ * credentials just by holding their id.
+ */
+async function canViewProfile(
+  viewer: { id: string; role: string },
+  targetUserId: string,
+): Promise<boolean> {
+  if (viewer.id === targetUserId) return true;
+  if (isAdminLevel(viewer.role)) return true;
+
+  // Site staff appear in every cohort directory, in both directions.
+  if (SITE_WIDE_ROLES.includes(viewer.role)) return true;
+
+  const [target, viewerProfile] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        role: true,
+        studentProfile: { select: { communityId: true, coachId: true, psmId: true, programManagerId: true } },
+      },
+    }),
+    prisma.studentProfile.findUnique({
+      where: { userId: viewer.id },
+      select: { coachId: true, psmId: true, programManagerId: true },
+    }),
+  ]);
+  if (!target) return false;
+
+  if (SITE_WIDE_ROLES.includes(target.role)) return true;
+
+  // The viewer serves the target, or the target serves the viewer.
+  const targetProfile = target.studentProfile;
+  if (targetProfile && (
+    targetProfile.coachId === viewer.id ||
+    targetProfile.psmId === viewer.id ||
+    targetProfile.programManagerId === viewer.id
+  )) return true;
+  if (viewerProfile && (
+    viewerProfile.coachId === targetUserId ||
+    viewerProfile.psmId === targetUserId ||
+    viewerProfile.programManagerId === targetUserId
+  )) return true;
+
+  // Otherwise they must share a cohort: the viewer's own learning communities
+  // plus the sibling LC in the same intake.
+  const own = await communityIdsForUser(viewer.id, viewer.role);
+  if (own.length === 0) return false;
+  const cohortIds = [...own, ...(await cohortSiblingCommunityIds(own))];
+
+  if (targetProfile?.communityId) return cohortIds.includes(targetProfile.communityId);
+
+  // A staff target with no cohort of their own: allowed if they serve this cohort.
+  const staffIds = await staffIdsForCommunities(cohortIds);
+  return staffIds.includes(targetUserId);
+}
 
 function serialiseDirectoryEntry(user: any) {
   return {
@@ -421,7 +499,9 @@ router.get('/profiles/directory', authMiddleware, async (req: AuthRequest, res) 
       prisma.user.findMany({
         where: {
           ...listable,
-          ...(cohortIds.length ? { id: { in: staffIds } } : { role: { in: STAFF_FUNCTION_ROLES } }),
+          ...(cohortIds.length
+            ? { OR: [{ id: { in: staffIds } }, { role: { in: SITE_WIDE_ROLES } }] }
+            : { role: { in: STAFF_FUNCTION_ROLES } }),
         },
         select: DIRECTORY_SELECT,
         orderBy: { name: 'asc' },
@@ -486,6 +566,10 @@ router.get('/profiles/:userId', authMiddleware, async (req: AuthRequest, res) =>
       include: PROFILE_INCLUDE,
     });
     if (!profile || (!profile.isPublished && !isAdminLevel(req.user.role))) {
+      return res.status(404).json({ error: 'This member has not published a profile yet' });
+    }
+    if (!(await canViewProfile(req.user, userId))) {
+      // Same shape as "not published" so this cannot be used to probe who exists.
       return res.status(404).json({ error: 'This member has not published a profile yet' });
     }
 
@@ -713,6 +797,9 @@ router.get('/profiles/:userId/resume-pdf', authMiddleware, async (req: AuthReque
       include: PROFILE_INCLUDE,
     });
     if (!profile || (!profile.isPublished && !isOwner && !isAdminLevel(req.user.role))) {
+      return res.status(404).json({ error: 'This member has not published a profile yet' });
+    }
+    if (!isOwner && !(await canViewProfile(req.user, userId))) {
       return res.status(404).json({ error: 'This member has not published a profile yet' });
     }
 

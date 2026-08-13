@@ -18,6 +18,7 @@ import { AllUsers } from './views/Admin/AllUsers';
 import { Pathways } from './views/Admin/Pathways';
 import { Classes } from './views/Admin/Classes';
 import { Communities } from './views/Admin/Communities';
+import { Cohorts } from './views/Admin/Cohorts';
 import { ReportCycles } from './views/Admin/ReportCycles';
 import { AllReports } from './views/Admin/AllReports';
 import { TargetedQuestions } from './views/Admin/TargetedQuestions';
@@ -104,6 +105,7 @@ export default function App() {
                   their own students/staff). */}
               <Route element={<RequireRole roles={AREA_ROLES.adminShared} />}>
                 <Route path="/admin/users" element={<AllUsers />} />
+                <Route path="/admin/cohorts" element={<Cohorts />} />
                 <Route path="/admin/reports" element={<AllReports />} />
                 <Route path="/admin/targeted-questions" element={<TargetedQuestions />} />
                 <Route path="/admin/analytics" element={<Analytics />} />

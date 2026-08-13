@@ -1301,7 +1301,7 @@ router.get('/reports/:id', authMiddleware, async (req: any, res: any) => {
     }
 });
 
-router.patch('/reports/:id/review', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH']), async (req: any, res: any) => {
+router.patch('/reports/:id/review', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH', 'PSM']), async (req: any, res: any) => {
     try {
         const { id } = req.params;
         const report = await prisma.weeklyReport.findUnique({
@@ -1447,7 +1447,7 @@ router.get('/coach/alerts', authMiddleware, roleMiddleware(['COACH', 'PSM']), as
     } catch(e) { res.status(500).json({ error: 'Server error' }); }
 });
 
-router.patch('/alerts/:id/resolve', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH']), async (req: any, res: any) => {
+router.patch('/alerts/:id/resolve', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH', 'PSM']), async (req: any, res: any) => {
     try {
         const alertInfo = await prisma.alert.findUnique({
             where: { id: req.params.id },
@@ -1632,7 +1632,7 @@ router.get('/pm/analytics', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']),
     } catch(e) { res.status(500).json({ error: 'Server error' }); }
 });
 
-router.post('/reports/:id/feedback', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH']), async (req: any, res: any) => {
+router.post('/reports/:id/feedback', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH', 'PSM']), async (req: any, res: any) => {
     try {
         const text = requiredString(req.body.text, 'feedback', 4000);
         const report = await prisma.weeklyReport.findUnique({
@@ -1747,5 +1747,9 @@ router.use(psmRoutes);
 // Performance contract standing, point balances, and EPIC plans.
 import contractRoutes from './contractRoutes.js';
 router.use(contractRoutes);
+
+// Cohort administration and PSM placement assignment.
+import cohortRoutes from './cohortRoutes.js';
+router.use(cohortRoutes);
 
 export default router;

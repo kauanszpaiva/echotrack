@@ -4,7 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
-  ShieldAlert, Award, Zap, Menu, X,
+  ShieldAlert, Award, Zap, Menu, X, GraduationCap,
   UserRound, Contact, Briefcase, Clock
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
@@ -56,6 +56,7 @@ export function DashboardLayout() {
       { label: 'Pathways',         href: '/admin/pathways',           icon: Layers },
       { label: 'Classes',          href: '/admin/classes',            icon: BookOpen },
       { label: 'Communities',      href: '/admin/communities',        icon: Users },
+      { label: 'Cohorts',          href: '/admin/cohorts',            icon: GraduationCap },
       { label: 'Report Cycles',    href: '/admin/cycles',             icon: Calendar },
       { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
       { label: 'Conduct Points',   href: '/admin/conduct',            icon: ShieldAlert },
@@ -68,6 +69,7 @@ export function DashboardLayout() {
     const pmItems = [
       { label: 'Dashboard',        href: '/pm',                       icon: LayoutDashboard },
       { label: 'Users',            href: '/admin/users',              icon: UserCog },
+      { label: 'Cohorts',          href: '/admin/cohorts',            icon: GraduationCap },
       { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
       { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
       { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 }

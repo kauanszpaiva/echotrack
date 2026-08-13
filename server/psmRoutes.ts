@@ -255,9 +255,24 @@ router.post('/student/timesheet', authMiddleware, roleMiddleware(['STUDENT']), a
     const rawEntries = Array.isArray(req.body?.entries) ? req.body.entries : [];
     if (rawEntries.length > 31) throw httpError(400, 'A timesheet can hold at most 31 entries');
 
+    // Hours must fall inside the cycle being submitted. Without this a typo or a
+    // crafted request files another week's hours under this cycle, corrupting
+    // the total the PSM approves.
+    const cycleStart = new Date(cycle.startDate);
+    cycleStart.setUTCHours(0, 0, 0, 0);
+    const cycleEnd = new Date(cycle.endDate);
+    cycleEnd.setUTCHours(23, 59, 59, 999);
+    const asDay = (date: Date) => date.toISOString().slice(0, 10);
+
     const entries = rawEntries.map((entry: any, index: number) => {
       const workDate = new Date(String(entry?.workDate || '').slice(0, 10) + 'T00:00:00.000Z');
       if (Number.isNaN(workDate.getTime())) throw httpError(400, `Entry ${index + 1} needs a valid date`);
+      if (workDate < cycleStart || workDate > cycleEnd) {
+        throw httpError(
+          400,
+          `Entry ${index + 1} (${asDay(workDate)}) falls outside ${cycle.name}, which runs ${asDay(cycleStart)} to ${asDay(cycleEnd)}.`,
+        );
+      }
       const hours = Number(entry?.hours);
       if (!Number.isFinite(hours) || hours < 0 || hours > 24) {
         throw httpError(400, `Entry ${index + 1} needs hours between 0 and 24`);
