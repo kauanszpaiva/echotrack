@@ -58,15 +58,15 @@ export function ProgramManagers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
          <div>
             <h1 className="text-2xl font-black font-display tracking-tight text-[#0A0A0A]">Program Managers</h1>
             <p className="text-[#6B7280] text-xs uppercase tracking-widest mt-1">Directory & Registration</p>
          </div>
       </div>
 
-      <div className="flex gap-6">
-        <div className="w-1/3">
+      <div className="flex flex-col lg:flex-row gap-6">
+        <div className="w-full lg:w-1/3">
            <Card className="p-6 bg-white sticky top-24">
              <h2 className="font-bold text-sm mb-4 flex items-center gap-2">
                  <Building2 className="w-4 h-4 text-[#FF7A00]" /> Register Program Manager
@@ -80,7 +80,7 @@ export function ProgramManagers() {
            </Card>
         </div>
         
-        <div className="flex-1 space-y-4">
+        <div className="flex-1 min-w-0 space-y-4">
            {pms.map(pm => (
              <Card key={pm.id} className="p-5 flex items-center justify-between hover:shadow-md transition-shadow">
                <div className="flex items-center gap-4">

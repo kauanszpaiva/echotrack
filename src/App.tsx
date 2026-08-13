@@ -1,6 +1,10 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
+import { AuthenticateWithRedirectCallback } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { RequireAuth, RequireRole } from './components/RouteGuards';
+import { AREA_ROLES, homePathForRole } from './lib/access';
 
 // Views
 import { Login } from './views/Auth/Login';
@@ -22,37 +26,6 @@ import { AuditLogs } from './views/Admin/AuditLogs';
 import { Settings } from './views/Admin/Settings';
 import { ContractPoints } from './views/Admin/ContractPoints';
 import { DevPanel } from './views/Dev/DevPanel';
-
-import { useEffect } from 'react';
-
-function DashboardRedirect() {
-  const { user, loading } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (loading) return;
-    if (!user) {
-      navigate('/login');
-      return;
-    }
-    switch (user.role) {
-      case 'DEV': navigate('/admin'); break;
-      case 'ADMIN': navigate('/admin'); break;
-      case 'PROGRAM_MANAGER': navigate('/pm'); break;
-      case 'INSTRUCTOR': navigate('/instructor'); break;
-      case 'COACH': navigate('/coach'); break;
-      case 'PSM': navigate('/psm'); break;
-      case 'STUDENT': navigate('/student'); break;
-      case 'INTERN': navigate('/student'); break;
-      // Placement and site staff have no dashboard of their own yet. Sending
-      // them to /login would bounce an authenticated user in a loop.
-      default: navigate('/profile'); break;
-    }
-  }, [user, loading, navigate]);
-
-  return <div>Redirecting...</div>;
-}
-
 import { StudentReportWizard } from './views/Student/StudentReportWizard';
 import { StudentDashboard } from './views/Student/StudentDashboard';
 import { PMDashboard } from './views/PM/PMDashboard';
@@ -66,60 +39,114 @@ import { StudentTimesheet } from './views/Student/StudentTimesheet';
 import { StudentStanding } from './views/Student/StudentStanding';
 import { MemberDirectory } from './views/Profile/MemberDirectory';
 
+function DashboardRedirect() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (loading) return;
+    navigate(homePathForRole(user?.role), { replace: true });
+  }, [user, loading, navigate]);
+
+  return <div>Redirecting...</div>;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Toaster position="top-right" />
         <Routes>
-        <Route path="/" element={<Navigate to="/login" />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<SignUp />} />
-        <Route path="/setup-account" element={<SetupAccount />} />
-        <Route path="/dashboard-redirect" element={<DashboardRedirect />} />
-        
-        <Route element={<DashboardLayout />}>
-          {/* Member profiles — available to every signed-in role. */}
-          <Route path="/profile" element={<MemberProfile />} />
-          <Route path="/profile/:userId" element={<MemberProfile />} />
-          <Route path="/directory" element={<MemberDirectory />} />
+          {/* Public */}
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<SignUp />} />
+          <Route path="/setup-account" element={<SetupAccount />} />
+          <Route
+            path="/sso-callback"
+            element={
+              <AuthenticateWithRedirectCallback
+                signInFallbackRedirectUrl="/dashboard-redirect"
+                signUpFallbackRedirectUrl="/dashboard-redirect"
+              />
+            }
+          />
 
-          <Route path="/dev" element={<DevPanel />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/staff" element={<ProgramManagers />} />
-          <Route path="/admin/users" element={<AllUsers />} />
-          <Route path="/admin/pathways" element={<Pathways />} />
-          <Route path="/admin/classes" element={<Classes />} />
-          <Route path="/admin/communities" element={<Communities />} />
-          <Route path="/admin/cycles" element={<ReportCycles />} />
-          <Route path="/admin/reports" element={<AllReports />} />
-          <Route path="/admin/targeted-questions" element={<TargetedQuestions />} />
-          <Route path="/admin/analytics" element={<Analytics />} />
-          <Route path="/admin/audit" element={<AuditLogs />} />
-          <Route path="/admin/conduct" element={<ConductTracker />} />
-          <Route path="/admin/settings" element={<Settings />} />
-          <Route path="/admin/contract-points" element={<ContractPoints />} />
-          <Route path="/admin/reports/:id" element={<ReportDetail />} />
+          {/* Authenticated. Each area additionally declares which roles may
+              enter it; the API enforces the same rules server-side. */}
+          <Route element={<RequireAuth />}>
+            <Route path="/dashboard-redirect" element={<DashboardRedirect />} />
 
-          <Route path="/pm" element={<PMDashboard />} />
-          <Route path="/pm/reports/:id" element={<ReportDetail />} />
-          
-          <Route path="/coach" element={<CoachDashboard />} />
-          <Route path="/psm" element={<PSMDashboard />} />
-          <Route path="/coach/reports/:id" element={<ReportDetail />} />
-          
-          <Route path="/instructor" element={<InstructorDashboard />} />
-          <Route path="/instructor/conduct" element={<ConductTracker />} />
-          <Route path="/instructor/reports/:id" element={<ReportDetail />} />
+            <Route element={<DashboardLayout />}>
+              {/* Member profiles and the directory — every signed-in role. */}
+              <Route path="/profile" element={<MemberProfile />} />
+              <Route path="/profile/:userId" element={<MemberProfile />} />
+              <Route path="/directory" element={<MemberDirectory />} />
 
-          <Route path="/student" element={<StudentDashboard />} />
-          <Route path="/student/report" element={<StudentReportWizard />} />
-          <Route path="/student/timesheet" element={<StudentTimesheet />} />
-          <Route path="/student/standing" element={<StudentStanding />} />
-          <Route path="/student/reports/:id" element={<ReportDetail />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
-  </AuthProvider>
+              <Route element={<RequireRole roles={AREA_ROLES.dev} />}>
+                <Route path="/dev" element={<DevPanel />} />
+              </Route>
+
+              {/* Admin-only */}
+              <Route element={<RequireRole roles={AREA_ROLES.admin} />}>
+                <Route path="/admin" element={<AdminDashboard />} />
+                <Route path="/admin/staff" element={<ProgramManagers />} />
+                <Route path="/admin/pathways" element={<Pathways />} />
+                <Route path="/admin/classes" element={<Classes />} />
+                <Route path="/admin/communities" element={<Communities />} />
+                <Route path="/admin/cycles" element={<ReportCycles />} />
+                <Route path="/admin/audit" element={<AuditLogs />} />
+                <Route path="/admin/settings" element={<Settings />} />
+                <Route path="/admin/contract-points" element={<ContractPoints />} />
+              </Route>
+
+              {/* Admin areas Program Managers also use (scoped server-side to
+                  their own students/staff). */}
+              <Route element={<RequireRole roles={AREA_ROLES.adminShared} />}>
+                <Route path="/admin/users" element={<AllUsers />} />
+                <Route path="/admin/reports" element={<AllReports />} />
+                <Route path="/admin/targeted-questions" element={<TargetedQuestions />} />
+                <Route path="/admin/analytics" element={<Analytics />} />
+                <Route path="/admin/reports/:id" element={<ReportDetail />} />
+              </Route>
+
+              <Route element={<RequireRole roles={AREA_ROLES.conduct} />}>
+                <Route path="/admin/conduct" element={<ConductTracker />} />
+              </Route>
+
+              <Route element={<RequireRole roles={AREA_ROLES.pm} />}>
+                <Route path="/pm" element={<PMDashboard />} />
+                <Route path="/pm/reports/:id" element={<ReportDetail />} />
+              </Route>
+
+              <Route element={<RequireRole roles={AREA_ROLES.coach} />}>
+                <Route path="/coach" element={<CoachDashboard />} />
+                <Route path="/coach/reports/:id" element={<ReportDetail />} />
+              </Route>
+
+              <Route element={<RequireRole roles={AREA_ROLES.psm} />}>
+                <Route path="/psm" element={<PSMDashboard />} />
+              </Route>
+
+              <Route element={<RequireRole roles={AREA_ROLES.instructor} />}>
+                <Route path="/instructor" element={<InstructorDashboard />} />
+                <Route path="/instructor/conduct" element={<ConductTracker />} />
+                <Route path="/instructor/reports/:id" element={<ReportDetail />} />
+              </Route>
+
+              <Route element={<RequireRole roles={AREA_ROLES.student} />}>
+                <Route path="/student" element={<StudentDashboard />} />
+                <Route path="/student/report" element={<StudentReportWizard />} />
+                <Route path="/student/timesheet" element={<StudentTimesheet />} />
+                <Route path="/student/standing" element={<StudentStanding />} />
+                <Route path="/student/reports/:id" element={<ReportDetail />} />
+              </Route>
+            </Route>
+          </Route>
+
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }

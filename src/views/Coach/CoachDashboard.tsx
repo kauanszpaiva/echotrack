@@ -64,7 +64,7 @@ export function CoachDashboard() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Coach Dashboard</h1>
+        <h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Coach Dashboard</h1>
         <p className="text-[#6B7280] text-sm mt-1">Review student progress and scheduled follow-ups.</p>
       </div>
 
@@ -107,15 +107,15 @@ export function CoachDashboard() {
       </div>
 
       <Card className="p-6">
-         <div className="flex justify-between items-center mb-6">
+         <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
             <h2 className="text-xl font-bold">Weekly Performance Reports</h2>
             <Link to="/coach/reports" className="text-xs text-[#FF7A00] font-bold hover:underline">View All History</Link>
          </div>
 
-         <div className="flex gap-6 border-b border-[#E5E7EB] mb-6">
+         <div className="flex gap-6 border-b border-[#E5E7EB] mb-6 overflow-x-auto">
             <button 
                onClick={() => setActiveTab('PENDING')} 
-               className={`pb-3 text-sm font-bold border-b-2 transition-all ${
+               className={`pb-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
                  activeTab === 'PENDING' ? 'border-[#FF7A00] text-[#FF7A00]' : 'border-transparent text-[#6B7280] hover:text-gray-900'
                }`}
             >
@@ -123,7 +123,7 @@ export function CoachDashboard() {
             </button>
             <button 
                onClick={() => setActiveTab('REVIEWED')} 
-               className={`pb-3 text-sm font-bold border-b-2 transition-all ${
+               className={`pb-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
                  activeTab === 'REVIEWED' ? 'border-[#FF7A00] text-[#FF7A00]' : 'border-transparent text-[#6B7280] hover:text-gray-900'
                }`}
             >

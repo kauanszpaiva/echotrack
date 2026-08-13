@@ -33,7 +33,7 @@ export function AuditLogs() {
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
           <h1 className="text-2xl font-black font-display tracking-tight text-[#0A0A0A]">Audit Logs</h1>
           <p className="text-[#6B7280] text-xs uppercase tracking-widest mt-1">System Security & Activity Records</p>

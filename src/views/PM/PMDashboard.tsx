@@ -42,7 +42,7 @@ export function PMDashboard() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Program Manager</h1>
+        <h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Program Manager</h1>
         <p className="text-[#6B7280] text-sm mt-1">Manage your active students and respond to critical alerts.</p>
       </div>
 

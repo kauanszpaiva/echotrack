@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
+import { ENABLED_OAUTH_PROVIDERS, useAuth, type OAuthProvider } from '../../hooks/useAuth';
 import { Logo } from '../../components/Logo';
 import { Button, Input, Card } from '../../components/ui/Common';
 import { LoaderCircle } from 'lucide-react';
@@ -29,8 +29,14 @@ const AppleIcon = () => (
   </svg>
 );
 
+const PROVIDER_BUTTONS: Record<OAuthProvider, { label: string; icon: () => ReactElement }> = {
+  google: { label: 'Continue with Google', icon: GoogleIcon },
+  microsoft: { label: 'Continue with Microsoft', icon: MicrosoftIcon },
+  apple: { label: 'Continue with Apple', icon: AppleIcon },
+};
+
 export function Login() {
-  const { login, loginWithProvider } = useAuth();
+  const { user, loading: authLoading, login, loginWithProvider, requestPasswordReset, resetPassword } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -38,12 +44,23 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
 
+  // Password reset / first-time password: 'off' → 'code' (code emailed) → done.
+  const [resetStep, setResetStep] = useState<'off' | 'code'>('off');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [noticeMsg, setNoticeMsg] = useState('');
+
+  // A refreshed page keeps its Clerk session — send an already-signed-in user
+  // straight to their dashboard instead of showing the login form again.
+  useEffect(() => {
+    if (!authLoading && user) navigate('/dashboard-redirect', { replace: true });
+  }, [authLoading, user, navigate]);
+
   const handleSubmit = async (e: any) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
     try {
-      localStorage.setItem('supabase_remember_me', rememberMe ? 'true' : 'false');
       await login(email, password);
       navigate('/dashboard-redirect');
     } catch (err: any) {
@@ -53,19 +70,56 @@ export function Login() {
     }
   };
 
-  const handleProvider = async (provider: 'google' | 'microsoft' | 'apple') => {
+  const handleRequestReset = async () => {
+    setErrorMsg('');
+    setNoticeMsg('');
+    if (!email.trim()) {
+      setErrorMsg('Enter your email address first, then request the code.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await requestPasswordReset(email);
+      setResetStep('code');
+      setNoticeMsg(`If an account exists for ${email.trim()}, a 6-digit code is on its way. Enter it below with your new password.`);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Could not send the code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: any) => {
+    e.preventDefault();
     setErrorMsg('');
     setLoading(true);
     try {
-      await loginWithProvider(provider);
+      await resetPassword(resetCode, newPassword);
       navigate('/dashboard-redirect');
     } catch (err: any) {
-      if (err.status === 404 && err.email) {
-        navigate(`/signup?email=${encodeURIComponent(err.email)}&name=${encodeURIComponent(err.name || '')}`);
-        return;
-      }
-      setErrorMsg(err.message || `${provider} sign-in failed.`);
+      setErrorMsg(err.message || 'Could not set the password.');
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelReset = () => {
+    setResetStep('off');
+    setResetCode('');
+    setNewPassword('');
+    setErrorMsg('');
+    setNoticeMsg('');
+  };
+
+  const handleProvider = async (provider: OAuthProvider) => {
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      // Redirects the browser to the provider on success; control only comes
+      // back here when the handshake could not be started.
+      await loginWithProvider(provider);
+    } catch (err: any) {
+      setErrorMsg(err.message || `${provider} sign-in failed.`);
       setLoading(false);
     }
   };
@@ -83,7 +137,7 @@ export function Login() {
             <p className="text-xs uppercase tracking-[0.2em] font-bold text-[#FF7A00] mt-2">KSP Dominion Group</p>
           </div>
 
-          <Card className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+          <Card className="bg-white p-5 sm:p-8 rounded-2xl border border-gray-100 shadow-sm">
             <h2 className="text-xl font-bold text-[#0A0A0A] mb-1">Sign in to your account</h2>
             <p className="text-sm text-gray-500 mb-6">Welcome back. Enter your credentials to continue.</p>
 
@@ -92,7 +146,32 @@ export function Login() {
                 {errorMsg}
               </div>
             )}
+            {noticeMsg && (
+              <div className="mb-5 p-3 rounded-xl bg-orange-50 border border-orange-100 text-sm text-[#9A4A00] font-medium">
+                {noticeMsg}
+              </div>
+            )}
 
+            {resetStep === 'code' ? (
+              /* Set a new password with the emailed code. Also the way an account
+                 created through Google gains a password for email + password sign-in. */
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <Input label="Email" type="email" value={email} onChange={(v: string) => setEmail(v)} required autoComplete="email" />
+                <Input label="6-digit code from your email" type="text" value={resetCode} onChange={(v: string) => setResetCode(v)} required autoComplete="one-time-code" />
+                <Input label="New password" type="password" value={newPassword} onChange={(v: string) => setNewPassword(v)} required minLength={8} autoComplete="new-password" />
+                <Button type="submit" disabled={loading} className="w-full h-12 text-base mt-2">
+                  {loading ? <><LoaderCircle className="w-4 h-4 animate-spin" /> Saving…</> : 'Set password and sign in'}
+                </Button>
+                <div className="flex items-center justify-between pt-1">
+                  <button type="button" onClick={cancelReset} className="text-sm font-semibold text-gray-500 hover:text-[#0A0A0A]">
+                    Back to sign in
+                  </button>
+                  <button type="button" disabled={loading} onClick={handleRequestReset} className="text-sm font-semibold text-[#FF7A00] hover:underline disabled:opacity-50">
+                    Resend code
+                  </button>
+                </div>
+              </form>
+            ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <Input label="Email" type="email" value={email} onChange={(v: string) => setEmail(v)} required autoComplete="email" />
               <Input label="Password" type="password" value={password} onChange={(v: string) => setPassword(v)} required autoComplete="current-password" />
@@ -107,37 +186,47 @@ export function Login() {
                   />
                   <span className="text-sm font-semibold text-gray-600">Remember me</span>
                 </label>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={handleRequestReset}
+                  className="text-sm font-semibold text-[#FF7A00] hover:underline disabled:opacity-50"
+                >
+                  Forgot / set password
+                </button>
               </div>
 
               <Button type="submit" disabled={loading} className="w-full h-12 text-base mt-2">
                 {loading ? <><LoaderCircle className="w-4 h-4 animate-spin" /> Signing in…</> : 'Sign In'}
               </Button>
             </form>
+            )}
 
-            <div className="relative my-7">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-white px-3 text-gray-400 uppercase tracking-widest font-bold">Or continue with</span>
-              </div>
-            </div>
+            {ENABLED_OAUTH_PROVIDERS.length > 0 && (
+              <>
+                <div className="relative my-7">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="bg-white px-3 text-gray-400 uppercase tracking-widest font-bold">Or continue with</span>
+                  </div>
+                </div>
 
-            <div className="space-y-3">
-              <button type="button" disabled={loading} onClick={() => handleProvider('google')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
-                <div className="absolute left-4"><GoogleIcon /></div>
-                <span className="font-semibold text-sm text-gray-700">Continue with Google</span>
-              </button>
-              <button type="button" disabled={loading} onClick={() => handleProvider('microsoft')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
-                <div className="absolute left-4"><MicrosoftIcon /></div>
-                <span className="font-semibold text-sm text-gray-700">Continue with Microsoft</span>
-              </button>
-              <button type="button" disabled={loading} onClick={() => handleProvider('apple')}
-                className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
-                <div className="absolute left-4"><AppleIcon /></div>
-                <span className="font-semibold text-sm text-gray-700">Continue with Apple</span>
-              </button>
-            </div>
+                {/* Only providers actually enabled for this Clerk instance are
+                    shown (VITE_OAUTH_PROVIDERS), so no button leads to a dead end. */}
+                <div className="space-y-3">
+                  {ENABLED_OAUTH_PROVIDERS.map((provider) => {
+                    const { label, icon: Icon } = PROVIDER_BUTTONS[provider];
+                    return (
+                      <button key={provider} type="button" disabled={loading} onClick={() => handleProvider(provider)}
+                        className="relative flex items-center justify-center w-full h-12 px-4 rounded-xl border border-gray-200 bg-white hover:border-[#FF7A00] hover:bg-orange-50/30 transition-colors disabled:opacity-50">
+                        <div className="absolute left-4"><Icon /></div>
+                        <span className="font-semibold text-sm text-gray-700">{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </Card>
 
           <p className="mt-6 text-center text-sm text-gray-600">

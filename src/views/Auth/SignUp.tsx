@@ -3,12 +3,13 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Card, Button, Input, Select } from '../../components/ui/Common';
 import { safeFetch } from '../../lib/fetchUtils';
-import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../hooks/useAuth';
 import { Logo } from '../../components/Logo';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function SignUp() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -71,12 +72,10 @@ export function SignUp() {
         body: JSON.stringify(formData)
       });
 
-      // The account now exists in Supabase Auth — establish the session.
-      const { error } = await supabase.auth.signInWithPassword({
-        email: formData.email.trim(),
-        password: formData.password,
-      });
-      if (error) {
+      // The account now exists in Clerk — establish the session.
+      try {
+        await login(formData.email.trim(), formData.password);
+      } catch {
         toast.success('Registration successful! Please sign in.');
         setTimeout(() => { window.location.href = '/login'; }, 1000);
         return;
@@ -116,14 +115,14 @@ export function SignUp() {
            </div>
         </div>
 
-        <Card className="p-8 bg-white overflow-hidden relative">
+        <Card className="p-5 sm:p-8 bg-white overflow-hidden relative">
           <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
               <h2 className="text-xl font-bold border-b pb-4">Personal Details</h2>
               <Input label="Full Name" value={formData.name} onChange={v => setFormData(f => ({...f, name: v}))} required />
               <Input label="Email" type="email" value={formData.email} onChange={v => setFormData(f => ({...f, email: v}))} required />
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input label="Password" type="password" value={formData.password} onChange={v => setFormData(f => ({...f, password: v}))} required minLength={8} />
                 <Input label="Confirm" type="password" value={formData.confirmPassword} onChange={v => setFormData(f => ({...f, confirmPassword: v}))} required minLength={8} />
               </div>

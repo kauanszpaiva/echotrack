@@ -136,7 +136,7 @@ export function StudentReportWizard() {
     <div className="max-w-3xl mx-auto py-8">
       <div className="mb-8 flex justify-between items-start">
          <div>
-            <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Weekly Report</h1>
+            <h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Weekly Report</h1>
             <p className="text-[#6B7280] text-sm mt-1">Reflect on your progress and share updates with your coach.</p>
          </div>
          <Button variant="outline" size="sm" onClick={() => saveReport('DRAFT')} disabled={loading}>
@@ -150,7 +150,7 @@ export function StudentReportWizard() {
          ))}
       </div>
 
-      <Card className="p-8 bg-white min-h-[400px]">
+      <Card className="p-5 sm:p-8 bg-white min-h-[400px]">
          <AnimatePresence mode="wait">
             {step === 1 && (
                <motion.div key="s1" initial={{opacity:0, x:20}} animate={{opacity:1, x:0}} exit={{opacity:0, x:-20}} className="space-y-6">

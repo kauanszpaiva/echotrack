@@ -37,7 +37,7 @@ export function ContractPoints() {
             <Award className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Contract Points</h1>
+            <h1 className="text-2xl sm:text-3xl font-black font-display tracking-tight text-[#0A0A0A]">Contract Points</h1>
             <p className="text-[#6B7280] text-sm mt-1">Calculate a student's points from their track and successful weeks.</p>
           </div>
         </div>

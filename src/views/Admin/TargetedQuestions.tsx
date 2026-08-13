@@ -59,15 +59,15 @@ export function TargetedQuestions() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
           <h1 className="text-2xl font-black font-display tracking-tight text-[#0A0A0A]">Targeted Questions</h1>
           <p className="text-[#6B7280] text-xs uppercase tracking-widest mt-1">Manage Custom Report Prompts</p>
         </div>
       </div>
       
-      <div className="flex gap-6">
-         <Card className="p-6 w-1/3 h-fit sticky top-24 border-[#E5E7EB]">
+      <div className="flex flex-col lg:flex-row gap-6">
+         <Card className="p-6 w-full lg:w-1/3 h-fit lg:sticky lg:top-24 border-[#E5E7EB]">
              <h2 className="font-bold text-sm mb-4">Add Question</h2>
              <form onSubmit={handleCreate} className="space-y-4">
                  <Input label="Question text" value={question} onChange={setQuestion} required />
@@ -82,9 +82,9 @@ export function TargetedQuestions() {
              </form>
          </Card>
       
-         <div className="flex-1 space-y-4">
+         <div className="flex-1 min-w-0 space-y-4">
             {questions.map(q => (
-                <Card key={q.id} className="p-5 flex justify-between items-center hover:shadow-md transition-shadow">
+                <Card key={q.id} className="p-5 flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center hover:shadow-md transition-shadow">
                     <div className="w-full">
                         <p className="font-medium text-[#0A0A0A]">{q.question}</p>
                         <div className="flex justify-between w-full mt-3">

@@ -1,7 +1,15 @@
-import React from 'react';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle } from 'docx';
+import { createElement } from 'react';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import { renderToStream } from '@react-pdf/renderer';
 import { Document as PdfDocument, Page as PdfPage, Text as PdfText, View as PdfView, StyleSheet } from '@react-pdf/renderer';
+
+// This module is deliberately JSX-free and lives in a `.ts` file, not `.tsx`.
+// Vercel's Node builder compiles the `.ts` files it traces into the serverless
+// bundle but skips `.tsx`, so as `exports.tsx` this file never reached the
+// lambda: `import './exports.js'` in routes.ts then threw ERR_MODULE_NOT_FOUND
+// at module load, killing the whole function. Every /api/* route — health check
+// included — answered with Vercel's plain-text FUNCTION_INVOCATION_FAILED page
+// rather than JSON. Keep the PDF tree built with createElement.
 
 export async function generateDocx(report: any): Promise<Buffer> {
     const doc = new Document({
@@ -72,32 +80,35 @@ const styles = StyleSheet.create({
   bold: { fontWeight: 'bold' }
 });
 
-export const ReportPdf = ({ report }: { report: any }) => (
-  <PdfDocument>
-    <PdfPage size="A4" style={styles.page}>
-      <PdfText style={styles.heading}>Weekly Status Report</PdfText>
-      <PdfText style={styles.subheading}>EchoTrack / KSP Dominion Group</PdfText>
+export const ReportPdf = ({ report }: { report: any }) =>
+  createElement(
+    PdfDocument,
+    null,
+    createElement(
+      PdfPage,
+      { size: 'A4', style: styles.page },
+      createElement(PdfText, { style: styles.heading }, 'Weekly Status Report'),
+      createElement(PdfText, { style: styles.subheading }, 'EchoTrack / KSP Dominion Group'),
 
-      <PdfText style={styles.text}>Good afternoon,</PdfText>
-      <PdfText style={styles.text}>I am eager to chat with you about {report.weeklyTopic}.</PdfText>
-      
-      <PdfText style={styles.sectionTitle}>Highlights</PdfText>
-      <PdfText style={styles.text}>{report.highlights}</PdfText>
-      
-      <PdfText style={styles.sectionTitle}>Class Experience</PdfText>
-      <PdfText style={styles.text}>{report.classExperience}</PdfText>
-      
-      <PdfText style={styles.sectionTitle}>In Closing</PdfText>
-      <PdfText style={styles.text}>{report.reflection}</PdfText>
-      
-      <PdfText style={styles.text}>{'\n'}Name: {report.student?.name}</PdfText>
-      <PdfText style={styles.text}>Email: {report.student?.email}</PdfText>
-    </PdfPage>
-  </PdfDocument>
-);
+      createElement(PdfText, { style: styles.text }, 'Good afternoon,'),
+      createElement(PdfText, { style: styles.text }, `I am eager to chat with you about ${report.weeklyTopic}.`),
+
+      createElement(PdfText, { style: styles.sectionTitle }, 'Highlights'),
+      createElement(PdfText, { style: styles.text }, report.highlights),
+
+      createElement(PdfText, { style: styles.sectionTitle }, 'Class Experience'),
+      createElement(PdfText, { style: styles.text }, report.classExperience),
+
+      createElement(PdfText, { style: styles.sectionTitle }, 'In Closing'),
+      createElement(PdfText, { style: styles.text }, report.reflection),
+
+      createElement(PdfText, { style: styles.text }, `\nName: ${report.student?.name}`),
+      createElement(PdfText, { style: styles.text }, `Email: ${report.student?.email}`)
+    )
+  );
 
 export async function generatePdf(report: any) {
-  return await renderToStream(<ReportPdf report={report} />);
+  return await renderToStream(createElement(ReportPdf, { report }));
 }
 
 /* ───────────────────────── member resume export ───────────────────────── */
@@ -155,127 +166,123 @@ const LOCATION_LABELS: Record<string, string> = {
 /** Joins the parts of a metadata line, skipping anything the member left blank. */
 const joinParts = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join(' · ');
 
+/**
+ * Built with createElement rather than JSX for the reason at the top of this
+ * file: as a `.tsx` file this module never reaches the Vercel lambda.
+ */
+const section = (title: string, ...children: any[]) =>
+  createElement(
+    PdfView,
+    { key: title },
+    createElement(PdfText, { style: resumeStyles.sectionTitle }, title),
+    ...children,
+  );
+
+const entryBlock = (key: string, title: string, meta: string, dates: string, description?: string | null) =>
+  createElement(
+    PdfView,
+    { key, style: resumeStyles.entry, wrap: false },
+    createElement(PdfText, { style: resumeStyles.entryTitle }, title),
+    meta ? createElement(PdfText, { style: resumeStyles.entryMeta }, meta) : null,
+    dates ? createElement(PdfText, { style: resumeStyles.entryDates }, dates) : null,
+    description ? createElement(PdfText, { style: resumeStyles.body }, description) : null,
+  );
+
 export const ResumePdf = ({ profile, member }: { profile: any; member: any }) => {
   const experiences = profile.workExperiences ?? [];
   const education = profile.education ?? [];
   const certifications = profile.certifications ?? [];
   const skills = (profile.skills ?? []).map((skill: any) => skill.name);
 
-  return (
-    <PdfDocument
-      title={`${member.name} — Resume`}
-      author="EchoTrack · KSP Dominion Group"
-    >
-      <PdfPage size="A4" style={resumeStyles.page}>
-        <PdfText style={resumeStyles.name}>{member.name}</PdfText>
-        {profile.headline ? <PdfText style={resumeStyles.headline}>{profile.headline}</PdfText> : null}
+  const contactLines = [
+    joinParts(member.email, profile.location),
+    joinParts(profile.linkedinUrl, profile.websiteUrl),
+    joinParts(member.community?.name, member.pathway?.name),
+  ].filter(Boolean);
 
-        <PdfText style={resumeStyles.contact}>
-          {joinParts(member.email, profile.location)}
-        </PdfText>
-        {profile.linkedinUrl || profile.websiteUrl ? (
-          <PdfText style={resumeStyles.contact}>
-            {joinParts(profile.linkedinUrl, profile.websiteUrl)}
-          </PdfText>
-        ) : null}
-        {member.community || member.pathway ? (
-          <PdfText style={resumeStyles.contact}>
-            {joinParts(member.community?.name, member.pathway?.name)}
-          </PdfText>
-        ) : null}
+  return createElement(
+    PdfDocument,
+    { title: `${member.name} — Resume`, author: 'EchoTrack · KSP Dominion Group' },
+    createElement(
+      PdfPage,
+      { size: 'A4', style: resumeStyles.page },
+      createElement(PdfText, { style: resumeStyles.name }, member.name),
+      profile.headline ? createElement(PdfText, { style: resumeStyles.headline }, profile.headline) : null,
+      ...contactLines.map((line, index) =>
+        createElement(PdfText, { key: `contact-${index}`, style: resumeStyles.contact }, line),
+      ),
+      createElement(PdfView, { style: resumeStyles.rule }),
 
-        <PdfView style={resumeStyles.rule} />
+      profile.about
+        ? section('ABOUT', createElement(PdfText, { style: resumeStyles.body }, profile.about))
+        : null,
 
-        {profile.about ? (
-          <PdfView>
-            <PdfText style={resumeStyles.sectionTitle}>ABOUT</PdfText>
-            <PdfText style={resumeStyles.body}>{profile.about}</PdfText>
-          </PdfView>
-        ) : null}
+      experiences.length
+        ? section(
+            'EXPERIENCE',
+            ...experiences.map((entry: any) =>
+              entryBlock(
+                entry.id,
+                entry.title,
+                joinParts(
+                  entry.company,
+                  EMPLOYMENT_LABELS[entry.employmentType] ?? entry.employmentType,
+                  entry.location,
+                  LOCATION_LABELS[entry.locationType] ?? entry.locationType,
+                ),
+                dateRange(entry.startDate, entry.endDate, entry.isCurrent),
+                entry.description,
+              ),
+            ),
+          )
+        : null,
 
-        {experiences.length > 0 ? (
-          <PdfView>
-            <PdfText style={resumeStyles.sectionTitle}>EXPERIENCE</PdfText>
-            {experiences.map((entry: any) => (
-              <PdfView key={entry.id} style={resumeStyles.entry} wrap={false}>
-                <PdfText style={resumeStyles.entryTitle}>{entry.title}</PdfText>
-                <PdfText style={resumeStyles.entryMeta}>
-                  {joinParts(
-                    entry.company,
-                    EMPLOYMENT_LABELS[entry.employmentType] ?? entry.employmentType,
-                    entry.location,
-                    LOCATION_LABELS[entry.locationType] ?? entry.locationType,
-                  )}
-                </PdfText>
-                <PdfText style={resumeStyles.entryDates}>
-                  {dateRange(entry.startDate, entry.endDate, entry.isCurrent)}
-                </PdfText>
-                {entry.description ? <PdfText style={resumeStyles.body}>{entry.description}</PdfText> : null}
-              </PdfView>
-            ))}
-          </PdfView>
-        ) : null}
+      education.length
+        ? section(
+            'EDUCATION',
+            ...education.map((entry: any) =>
+              entryBlock(
+                entry.id,
+                entry.school,
+                joinParts(entry.degree, entry.fieldOfStudy),
+                dateRange(entry.startDate, entry.endDate, entry.isCurrent),
+                entry.description,
+              ),
+            ),
+          )
+        : null,
 
-        {education.length > 0 ? (
-          <PdfView>
-            <PdfText style={resumeStyles.sectionTitle}>EDUCATION</PdfText>
-            {education.map((entry: any) => (
-              <PdfView key={entry.id} style={resumeStyles.entry} wrap={false}>
-                <PdfText style={resumeStyles.entryTitle}>{entry.school}</PdfText>
-                <PdfText style={resumeStyles.entryMeta}>
-                  {joinParts(entry.degree, entry.fieldOfStudy)}
-                </PdfText>
-                <PdfText style={resumeStyles.entryDates}>
-                  {dateRange(entry.startDate, entry.endDate, entry.isCurrent)}
-                </PdfText>
-                {entry.description ? <PdfText style={resumeStyles.body}>{entry.description}</PdfText> : null}
-              </PdfView>
-            ))}
-          </PdfView>
-        ) : null}
+      certifications.length
+        ? section(
+            'LICENSES & CERTIFICATIONS',
+            ...certifications.map((entry: any) =>
+              entryBlock(
+                entry.id,
+                entry.name,
+                joinParts(entry.issuer, entry.credentialId ? `Credential ID ${entry.credentialId}` : null),
+                joinParts(
+                  entry.issueDate ? `Issued ${monthYear(entry.issueDate)}` : null,
+                  entry.expiryDate ? `Expires ${monthYear(entry.expiryDate)}` : null,
+                ),
+              ),
+            ),
+          )
+        : null,
 
-        {certifications.length > 0 ? (
-          <PdfView>
-            <PdfText style={resumeStyles.sectionTitle}>LICENSES &amp; CERTIFICATIONS</PdfText>
-            {certifications.map((entry: any) => (
-              <PdfView key={entry.id} style={resumeStyles.entry} wrap={false}>
-                <PdfText style={resumeStyles.entryTitle}>{entry.name}</PdfText>
-                <PdfText style={resumeStyles.entryMeta}>
-                  {joinParts(
-                    entry.issuer,
-                    entry.credentialId ? `Credential ID ${entry.credentialId}` : null,
-                  )}
-                </PdfText>
-                <PdfText style={resumeStyles.entryDates}>
-                  {joinParts(
-                    entry.issueDate ? `Issued ${monthYear(entry.issueDate)}` : null,
-                    entry.expiryDate ? `Expires ${monthYear(entry.expiryDate)}` : null,
-                  )}
-                </PdfText>
-              </PdfView>
-            ))}
-          </PdfView>
-        ) : null}
+      skills.length
+        ? section('SKILLS', createElement(PdfText, { style: resumeStyles.skills }, skills.join(' · ')))
+        : null,
 
-        {skills.length > 0 ? (
-          <PdfView>
-            <PdfText style={resumeStyles.sectionTitle}>SKILLS</PdfText>
-            <PdfText style={resumeStyles.skills}>{skills.join(' · ')}</PdfText>
-          </PdfView>
-        ) : null}
-
-        <PdfText
-          style={resumeStyles.footer}
-          render={({ pageNumber, totalPages }) =>
-            `EchoTrack · KSP Dominion Group — page ${pageNumber} of ${totalPages}`
-          }
-          fixed
-        />
-      </PdfPage>
-    </PdfDocument>
+      createElement(PdfText, {
+        style: resumeStyles.footer,
+        fixed: true,
+        render: ({ pageNumber, totalPages }: any) =>
+          `EchoTrack · KSP Dominion Group — page ${pageNumber} of ${totalPages}`,
+      }),
+    ),
   );
 };
 
 export async function generateResumePdf({ profile, member }: { profile: any; member: any }) {
-  return await renderToStream(<ResumePdf profile={profile} member={member} />);
+  return await renderToStream(ResumePdf({ profile, member }));
 }

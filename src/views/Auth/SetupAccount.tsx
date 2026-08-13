@@ -3,13 +3,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Card, Button, Input } from '../../components/ui/Common';
 import { safeFetch } from '../../lib/fetchUtils';
-import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../hooks/useAuth';
 import { Logo } from '../../components/Logo';
 
 export function SetupAccount() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -28,13 +29,12 @@ export function SetupAccount() {
         body: JSON.stringify({ token, password })
       });
 
-      // The Supabase Auth account was just created — establish the session.
+      // The Clerk account was just created — establish the session.
       const email = res?.user?.email;
-      const { error } = email
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : { error: new Error('missing email') };
-
-      if (error) {
+      try {
+        if (!email) throw new Error('missing email');
+        await login(email, password);
+      } catch {
         toast.success('Account setup complete! Please sign in.');
         setTimeout(() => { window.location.href = '/login'; }, 1000);
         return;
@@ -62,7 +62,7 @@ export function SetupAccount() {
           <p className="text-xs font-bold text-[#6B7280] uppercase tracking-widest mt-1">Echotrack Registration</p>
         </div>
         
-        <Card className="p-8 bg-white">
+        <Card className="p-5 sm:p-8 bg-white">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-4">
               <Input 

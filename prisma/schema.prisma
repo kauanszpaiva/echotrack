@@ -11,13 +11,24 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
+  id String @id @default(cuid())
+
+  /// Clerk user id (`user_…`). Clerk owns identity; this column links the Clerk
+  /// user to its local mirror row so the link survives email changes and so
+  /// rows created before Clerk (Supabase Auth UUIDs, cuids) keep their id and
+  /// all their existing relations. Null until the user first signs in.
+  clerkUserId String? @unique @map("clerk_user_id")
+
+  email String @unique
+  /// DEPRECATED — never read or written by authentication. Clerk owns passwords.
+  /// Kept as an empty-string column so no destructive migration is needed; drop
+  /// it in a dedicated migration once every environment is confirmed clean.
   password      String   @default("")
   name          String
   role          String   @default("STUDENT") // Admin, Program_Manager, etc.
   accountStatus String   @default("ACTIVE") @map("account_status")
   inviteToken   String?  @unique @map("invite_token")
+  inviteExpires DateTime? @map("invite_expires_at")
   avatarUrl     String?  @map("avatar_url")
   isActive      Boolean  @default(true) @map("is_active")
   createdAt     DateTime @default(now()) @map("created_at")

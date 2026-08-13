@@ -28,7 +28,7 @@ export function Settings() {
 
   return (
     <div className="space-y-6">
-       <div className="flex justify-between items-center">
+       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
          <div>
             <h1 className="text-2xl font-black font-display tracking-tight text-[#0A0A0A]">Settings</h1>
             <p className="text-[#6B7280] text-[10px] font-bold uppercase tracking-widest mt-1">Application Configuration</p>
