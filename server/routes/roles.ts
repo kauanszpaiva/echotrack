@@ -14,7 +14,7 @@ const router = Router();
 router.get('/student/me', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
+      where: { id: (req as any).user.id },
       include: { studentProfile: { include: { programManager: true, coach: true, pathway: true, classEnrollments: { include: { classModel: true } } } } }
     });
     const cycleScope = user?.studentProfile?.pathwayId
@@ -26,7 +26,7 @@ router.get('/student/me', authMiddleware, roleMiddleware(['STUDENT']), async (re
     });
     let currentReport = null;
     if (openCycle) {
-      currentReport = await prisma.weeklyReport.findFirst({ where: { studentId: req.user.id, cycleId: openCycle.id } });
+      currentReport = await prisma.weeklyReport.findFirst({ where: { studentId: (req as any).user.id, cycleId: openCycle.id } });
     }
     res.json(omitSensitive({ ...user, currentCycle: openCycle, currentReport }));
   } catch (e) {
@@ -37,7 +37,7 @@ router.get('/student/me', authMiddleware, roleMiddleware(['STUDENT']), async (re
 router.get('/student/classes', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
+      where: { id: (req as any).user.id },
       include: { studentProfile: { include: { classEnrollments: { include: { classModel: { include: { instructor: true } } } } } } }
     });
     res.json(omitSensitive(user?.studentProfile?.classEnrollments.map((e: any) => e.classModel) || []));
@@ -49,7 +49,7 @@ router.get('/student/classes', authMiddleware, roleMiddleware(['STUDENT']), asyn
 router.get('/student/history', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) => {
   try {
     const reports = await prisma.weeklyReport.findMany({
-      where: { studentId: req.user.id },
+      where: { studentId: (req as any).user.id },
       include: { cycle: true, classRatings: { include: { classModel: true } } },
       orderBy: { submittedAt: 'desc' }
     });
@@ -62,7 +62,7 @@ router.get('/student/history', authMiddleware, roleMiddleware(['STUDENT']), asyn
 router.get('/student/reports', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) => {
   try {
     const reports = await prisma.weeklyReport.findMany({
-      where: { studentId: req.user.id },
+      where: { studentId: (req as any).user.id },
       include: { cycle: true },
       orderBy: { submittedAt: 'desc' }
     });
@@ -80,12 +80,12 @@ router.get('/coach/dashboard', authMiddleware, roleMiddleware(['COACH']), async 
   try {
     const [students, reports] = await Promise.all([
       prisma.user.findMany({
-        where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: req.user.id } },
+        where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: (req as any).user.id } },
         select: { id: true, name: true, email: true, role: true, accountStatus: true, isActive: true, createdAt: true }
       }),
       prisma.weeklyReport.findMany({
         where: {
-          student: { studentProfile: { coachId: req.user.id } },
+          student: { studentProfile: { coachId: (req as any).user.id } },
           status: { in: ['SUBMITTED', 'REVIEWED'] }
         },
         include: { student: true }
@@ -100,7 +100,7 @@ router.get('/coach/dashboard', authMiddleware, roleMiddleware(['COACH']), async 
 router.get('/coach/students', authMiddleware, roleMiddleware(['COACH']), async (req, res) => {
   try {
     const students = await prisma.user.findMany({
-      where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: req.user.id } },
+      where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: (req as any).user.id } },
       include: { studentProfile: { include: { pathway: true } } }
     });
     res.json(omitSensitive(students));
@@ -113,7 +113,7 @@ router.get('/coach/reports', authMiddleware, roleMiddleware(['COACH']), async (r
   try {
     const reports = await prisma.weeklyReport.findMany({
       where: {
-        student: { studentProfile: { coachId: req.user.id } },
+        student: { studentProfile: { coachId: (req as any).user.id } },
         status: { in: ['SUBMITTED', 'REVIEWED'] }
       },
       include: { student: true, cycle: true, classRatings: true },
@@ -128,7 +128,7 @@ router.get('/coach/reports', authMiddleware, roleMiddleware(['COACH']), async (r
 router.get('/coach/alerts', authMiddleware, roleMiddleware(['COACH']), async (req, res) => {
   try {
     const alerts = await prisma.alert.findMany({
-      where: { resolved: false, student: { studentProfile: { coachId: req.user.id } } },
+      where: { resolved: false, student: { studentProfile: { coachId: (req as any).user.id } } },
       include: { student: true },
       orderBy: { createdAt: 'desc' }
     });
@@ -146,11 +146,11 @@ router.get('/pm/dashboard', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']),
   try {
     const [students, alerts] = await Promise.all([
       prisma.user.findMany({
-        where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: req.user.id } },
+        where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: (req as any).user.id } },
         include: { weeklyReports: { where: { status: { in: ['SUBMITTED', 'REVIEWED'] } } } }
       }),
       prisma.alert.findMany({
-        where: { resolved: false, student: { studentProfile: { programManagerId: req.user.id } } },
+        where: { resolved: false, student: { studentProfile: { programManagerId: (req as any).user.id } } },
         include: { student: true }
       })
     ]);
@@ -164,7 +164,7 @@ router.get('/pm/dashboard', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']),
 router.get('/pm/students', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req, res) => {
   try {
     const students = await prisma.user.findMany({
-      where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: req.user.id } },
+      where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: (req as any).user.id } },
       include: { studentProfile: { include: { pathway: true, coach: true } } }
     });
     res.json(omitSensitive(students));
@@ -176,7 +176,7 @@ router.get('/pm/students', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), 
 router.get('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req, res) => {
   try {
     const staff = await prisma.user.findMany({
-      where: { role: { in: ['COACH', 'PSM', 'INSTRUCTOR'] }, managerId: req.user.id, isActive: true },
+      where: { role: { in: ['COACH', 'PSM', 'INSTRUCTOR'] }, managerId: (req as any).user.id, isActive: true },
       select: { id: true, name: true, email: true, role: true, accountStatus: true, isActive: true, createdAt: true }
     });
     res.json(staff);
@@ -188,7 +188,7 @@ router.get('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), asy
 router.get('/pm/communities', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req, res) => {
   try {
     const communities = await prisma.community.findMany({
-      where: { programManagerId: req.user.id },
+      where: { programManagerId: (req as any).user.id },
       include: { programManager: { select: { id: true, name: true, email: true } } }
     });
     res.json(communities);
@@ -201,7 +201,7 @@ router.get('/pm/reports', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), a
   try {
     const reports = await prisma.weeklyReport.findMany({
       where: {
-        student: { studentProfile: { programManagerId: req.user.id } },
+        student: { studentProfile: { programManagerId: (req as any).user.id } },
         status: { in: ['SUBMITTED', 'REVIEWED'] }
       },
       include: { student: true, cycle: true, classRatings: true },
@@ -215,7 +215,7 @@ router.get('/pm/reports', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), a
 
 router.get('/pm/analytics', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req, res) => {
   try {
-    const pmId = req.user.id;
+    const pmId = (req as any).user.id;
     const [totalStudents, cycle] = await Promise.all([
       prisma.user.count({ where: { role: { in: STUDENT_LEVEL }, isActive: true, studentProfile: { programManagerId: pmId } } }),
       prisma.reportCycle.findFirst({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' } })
@@ -248,11 +248,11 @@ router.get('/pm/analytics', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']),
 router.get('/instructor/dashboard', authMiddleware, roleMiddleware(['INSTRUCTOR']), async (req, res) => {
   try {
     const classes = await prisma.classModel.findMany({
-      where: { instructorId: req.user.id, isActive: true },
+      where: { instructorId: (req as any).user.id, isActive: true },
       include: { _count: { select: { studentClassEnrollments: true } } }
     });
     const ratings = await prisma.classRating.findMany({
-      where: { classModel: { instructorId: req.user.id } },
+      where: { classModel: { instructorId: (req as any).user.id } },
       include: { classModel: true }
     });
     res.json({ classes, ratings });
@@ -264,7 +264,7 @@ router.get('/instructor/dashboard', authMiddleware, roleMiddleware(['INSTRUCTOR'
 router.get('/instructor/classes', authMiddleware, roleMiddleware(['INSTRUCTOR']), async (req, res) => {
   try {
     const classes = await prisma.classModel.findMany({
-      where: { instructorId: req.user.id, isActive: true },
+      where: { instructorId: (req as any).user.id, isActive: true },
       include: { studentClassEnrollments: { include: { studentProfile: { include: { user: true } } } } }
     });
     res.json(omitSensitive(classes));
@@ -275,7 +275,7 @@ router.get('/instructor/classes', authMiddleware, roleMiddleware(['INSTRUCTOR'])
 
 router.get('/instructor/reports', authMiddleware, roleMiddleware(['INSTRUCTOR']), async (req, res) => {
   try {
-    const myClasses = await prisma.classModel.findMany({ where: { instructorId: req.user.id } });
+    const myClasses = await prisma.classModel.findMany({ where: { instructorId: (req as any).user.id } });
     const classIds = myClasses.map(c => c.id);
     const ratings = await prisma.classRating.findMany({
       where: { classId: { in: classIds } },
@@ -298,12 +298,12 @@ router.get('/instructor/reports', authMiddleware, roleMiddleware(['INSTRUCTOR'])
 router.patch('/alerts/:id/resolve', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH']), async (req, res) => {
   try {
     const alertInfo = await prisma.alert.findUnique({
-      where: { id: req.params.id },
+      where: { id: (req as any).params.id },
       include: { student: { include: { studentProfile: true } } }
     });
     if (!alertInfo) return res.status(404).json({ error: 'Alert not found' });
 
-    const reqUser = req.user;
+    const reqUser = (req as any).user;
     let authorized = false;
     if (isAdminLevel(reqUser.role)) authorized = true;
     else if (isCoachLevel(reqUser.role) && alertInfo.student.studentProfile?.coachId === reqUser.id) authorized = true;
@@ -311,7 +311,7 @@ router.patch('/alerts/:id/resolve', authMiddleware, roleMiddleware(['ADMIN', 'PR
 
     if (!authorized) return res.status(403).json({ error: 'Unauthorized to resolve this alert' });
 
-    await prisma.alert.update({ where: { id: req.params.id }, data: { resolved: true } });
+    await prisma.alert.update({ where: { id: (req as any).params.id }, data: { resolved: true } });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'Server error' });

@@ -12,7 +12,7 @@ const router = Router();
 // ── Registro de Staff ──────────────────────────────────────────────────────
 
 router.post('/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
-  const parsed = registerStaffSchema.safeParse(req.body);
+  const parsed = registerStaffSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -20,7 +20,7 @@ router.post('/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM
   const normalizedEmail = email.toLowerCase();
 
   let newRole = role;
-  if (isAdminLevel(req.user.role)) {
+  if (isAdminLevel((req as any).user.role)) {
     if (!['PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'INTERN'].includes(newRole)) {
       return res.status(400).json({ error: 'Invalid staff role' });
     }
@@ -48,7 +48,7 @@ router.post('/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM
           role: newRole,
           accountStatus: 'ACTIVE',
           isActive: true,
-          managerId: req.user.role === 'PROGRAM_MANAGER' ? req.user.id : undefined
+          managerId: (req as any).user.role === 'PROGRAM_MANAGER' ? (req as any).user.id : undefined
         }
       });
     } catch (dbError) {
@@ -57,7 +57,7 @@ router.post('/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM
     }
 
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'USER', entityId: user.id, description: `${isAdminLevel(req.user?.role) ? 'Admin' : 'Program Manager'} registered ${newRole} ${name}` }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'USER', entityId: user.id, description: `${isAdminLevel((req as any).user?.role) ? 'Admin' : 'Program Manager'} registered ${newRole} ${name}` }
     });
 
     res.json({
@@ -72,7 +72,7 @@ router.post('/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM
 // ── Convite de PM ──────────────────────────────────────────────────────────
 
 router.post('/invite', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
-  const parsed = inviteSchema.safeParse(req.body);
+  const parsed = inviteSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -96,7 +96,7 @@ router.post('/invite', authMiddleware, roleMiddleware(['ADMIN']), async (req, re
     });
 
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'USER', entityId: user.id, description: `Admin invited Program Manager ${name}` }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'USER', entityId: user.id, description: `Admin invited Program Manager ${name}` }
     });
 
     res.json({
@@ -111,7 +111,7 @@ router.post('/invite', authMiddleware, roleMiddleware(['ADMIN']), async (req, re
 
 router.delete('/invite', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     await prisma.user.update({
       where: { id: String(id) },
       data: { accountStatus: 'DEACTIVATED', isActive: false }
@@ -143,14 +143,14 @@ router.get('/pathways', authMiddleware, roleMiddleware(['ADMIN']), async (req, r
 });
 
 router.post('/pathways', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
-  const parsed = pathwaySchema.safeParse(req.body);
+  const parsed = pathwaySchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
   try {
     const pathway = await prisma.pathway.create({ data: parsed.data });
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'Pathway', entityId: pathway.id, description: `Created pathway ${pathway.name}` }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'Pathway', entityId: pathway.id, description: `Created pathway ${pathway.name}` }
     });
     res.json(pathway);
   } catch (e) {
@@ -160,7 +160,7 @@ router.post('/pathways', authMiddleware, roleMiddleware(['ADMIN']), async (req, 
 
 router.delete('/pathways', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     await prisma.pathway.update({ where: { id: String(id) }, data: { isActive: false } });
     res.json({ success: true });
   } catch (e) {
@@ -183,14 +183,14 @@ router.get('/classes', authMiddleware, roleMiddleware(['ADMIN']), async (req, re
 });
 
 router.post('/classes', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
-  const parsed = classSchema.safeParse(req.body);
+  const parsed = classSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
   try {
     const cls = await prisma.classModel.create({ data: parsed.data });
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'Class', entityId: cls.id, description: `Created class ${cls.name}` }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'Class', entityId: cls.id, description: `Created class ${cls.name}` }
     });
     res.json(cls);
   } catch (e) {
@@ -200,7 +200,7 @@ router.post('/classes', authMiddleware, roleMiddleware(['ADMIN']), async (req, r
 
 router.delete('/classes', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     await prisma.classModel.update({ where: { id: String(id) }, data: { isActive: false } });
     res.json({ success: true });
   } catch (e) {
@@ -223,14 +223,14 @@ router.get('/communities', authMiddleware, roleMiddleware(['ADMIN']), async (req
 });
 
 router.post('/communities', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
-  const parsed = communitySchema.safeParse(req.body);
+  const parsed = communitySchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
   try {
     const comm = await prisma.community.create({ data: parsed.data });
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'Community', entityId: comm.id, description: `Created community: ${comm.name}` }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'Community', entityId: comm.id, description: `Created community: ${comm.name}` }
     });
     res.json(comm);
   } catch (e) {
@@ -240,10 +240,10 @@ router.post('/communities', authMiddleware, roleMiddleware(['ADMIN']), async (re
 
 router.delete('/communities', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     await prisma.community.update({ where: { id: String(id) }, data: { isActive: false } });
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'DELETE', entityType: 'Community', entityId: String(id), description: `Deactivated community` }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'DELETE', entityType: 'Community', entityId: String(id), description: `Deactivated community` }
     });
     res.json({ success: true });
   } catch (e) {
@@ -265,7 +265,7 @@ router.get('/cycles', authMiddleware, roleMiddleware(['ADMIN']), async (req, res
 });
 
 router.post('/cycles', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
-  const parsed = cycleSchema.safeParse(req.body);
+  const parsed = cycleSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -287,7 +287,7 @@ router.post('/cycles', authMiddleware, roleMiddleware(['ADMIN']), async (req, re
       }
     });
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'ReportCycle', entityId: cycle.id, description: `Created cycle: ${cycle.name}` }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'ReportCycle', entityId: cycle.id, description: `Created cycle: ${cycle.name}` }
     });
     res.json(cycle);
   } catch (e) {
@@ -296,12 +296,12 @@ router.post('/cycles', authMiddleware, roleMiddleware(['ADMIN']), async (req, re
 });
 
 router.patch('/cycles/:id', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
-  const parsed = updateCycleSchema.safeParse(req.body);
+  const parsed = updateCycleSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
   try {
-    const { id } = req.params;
+    const { id } = (req as any).params;
     if (parsed.data.status === 'OPEN') {
       const cycle = await prisma.reportCycle.findUnique({ where: { id } });
       const hasOpen = await prisma.reportCycle.findFirst({
@@ -321,11 +321,11 @@ router.patch('/cycles/:id', authMiddleware, roleMiddleware(['ADMIN']), async (re
 
 router.get('/users', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
   try {
-    const where = req.user.role === 'PROGRAM_MANAGER'
+    const where = (req as any).user.role === 'PROGRAM_MANAGER'
       ? {
         OR: [
-          { managerId: req.user.id },
-          { studentProfile: { programManagerId: req.user.id } }
+          { managerId: (req as any).user.id },
+          { studentProfile: { programManagerId: (req as any).user.id } }
         ]
       }
       : {};
@@ -342,19 +342,19 @@ router.get('/users', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']
 
 router.patch('/users/:id', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
   try {
-    const { id } = req.params;
-    const { isActive } = req.body;
+    const { id } = (req as any).params;
+    const { isActive } = (req as any).body;
 
     const targetUser = await prisma.user.findUnique({ where: { id }, include: { studentProfile: true } });
     if (!targetUser) return res.status(404).json({ error: 'User not found' });
 
-    if (req.user.role === 'PROGRAM_MANAGER') {
-      const managesStaff = targetUser.managerId === req.user.id;
-      const managesStudent = targetUser.studentProfile?.programManagerId === req.user.id;
+    if ((req as any).user.role === 'PROGRAM_MANAGER') {
+      const managesStaff = targetUser.managerId === (req as any).user.id;
+      const managesStudent = targetUser.studentProfile?.programManagerId === (req as any).user.id;
       if (!managesStaff && !managesStudent) return res.status(403).json({ error: 'Forbidden' });
     }
 
-    if (req.user.role === 'PROGRAM_MANAGER' && (isAdminLevel(targetUser.role) || targetUser.role === 'PROGRAM_MANAGER')) {
+    if ((req as any).user.role === 'PROGRAM_MANAGER' && (isAdminLevel(targetUser.role) || targetUser.role === 'PROGRAM_MANAGER')) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -383,7 +383,7 @@ router.get('/settings', authMiddleware, roleMiddleware(['ADMIN']), async (req, r
 });
 
 router.patch('/settings', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
-  const parsed = settingsSchema.safeParse(req.body);
+  const parsed = settingsSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -395,7 +395,7 @@ router.patch('/settings', authMiddleware, roleMiddleware(['ADMIN']), async (req,
     });
 
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'UPDATE', entityType: 'Settings', entityId: 'singleton', description: 'Updated app settings' }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'UPDATE', entityType: 'Settings', entityId: 'singleton', description: 'Updated app settings' }
     });
     res.json(updated);
   } catch (e) {
@@ -409,21 +409,21 @@ router.patch('/settings', authMiddleware, roleMiddleware(['ADMIN']), async (req,
 router.get('/targeted-questions', authMiddleware, async (req, res) => {
   try {
     const where: any = { isActive: true };
-    if (isStudentLevel(req.user.role)) {
-      where.studentId = req.user.id;
-    } else if (req.user.role === 'PROGRAM_MANAGER') {
+    if (isStudentLevel((req as any).user.role)) {
+      where.studentId = (req as any).user.id;
+    } else if ((req as any).user.role === 'PROGRAM_MANAGER') {
       const students = await prisma.user.findMany({
-        where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: req.user.id } },
+        where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: (req as any).user.id } },
         select: { id: true }
       });
       where.studentId = { in: students.map((s) => s.id) };
-    } else if (isCoachLevel(req.user.role)) {
+    } else if (isCoachLevel((req as any).user.role)) {
       const students = await prisma.user.findMany({
-        where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: req.user.id } },
+        where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: (req as any).user.id } },
         select: { id: true }
       });
       where.studentId = { in: students.map((s) => s.id) };
-    } else if (!isAdminLevel(req.user.role)) {
+    } else if (!isAdminLevel((req as any).user.role)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -438,7 +438,7 @@ router.get('/targeted-questions', authMiddleware, async (req, res) => {
 });
 
 router.post('/targeted-questions', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
-  const parsed = targetedQuestionSchema.safeParse(req.body);
+  const parsed = targetedQuestionSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -452,14 +452,14 @@ router.post('/targeted-questions', authMiddleware, roleMiddleware(['ADMIN', 'PRO
       return res.status(400).json({ error: 'Invalid student selected' });
     }
 
-    if (req.user.role === 'PROGRAM_MANAGER') {
-      if (student?.studentProfile?.programManagerId !== req.user.id) {
+    if ((req as any).user.role === 'PROGRAM_MANAGER') {
+      if (student?.studentProfile?.programManagerId !== (req as any).user.id) {
         return res.status(403).json({ error: 'Unauthorized to target this student' });
       }
     }
 
     const created = await prisma.targetedQuestion.create({
-      data: { question, studentId, cycleId: cycleId || null, creatorId: req.user.id }
+      data: { question, studentId, cycleId: cycleId || null, creatorId: (req as any).user.id }
     });
     res.json(created);
   } catch (e: any) {
@@ -469,11 +469,11 @@ router.post('/targeted-questions', authMiddleware, roleMiddleware(['ADMIN', 'PRO
 
 router.delete('/targeted-questions', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     const q = await prisma.targetedQuestion.findUnique({ where: { id: String(id) } });
     if (!q) return res.status(404).json({ error: 'Not found' });
 
-    if (req.user.role === 'PROGRAM_MANAGER' && q.creatorId !== req.user.id) {
+    if ((req as any).user.role === 'PROGRAM_MANAGER' && q.creatorId !== (req as any).user.id) {
       return res.status(403).json({ error: 'Unauthorized to delete this question' });
     }
 
@@ -513,8 +513,8 @@ router.get('/instructors', authMiddleware, roleMiddleware(['ADMIN']), async (req
 
 router.get('/analytics', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res, next) => {
   try {
-    if (req.user.role === 'PROGRAM_MANAGER') {
-      const pmId = req.user.id;
+    if ((req as any).user.role === 'PROGRAM_MANAGER') {
+      const pmId = (req as any).user.id;
       const [totalStudents, totalStaff, cycle, submittedReportsThisCycle, reviewedReportsThisCycle, activeAlerts, needsSupportReports] = await Promise.all([
         prisma.user.count({ where: { role: { in: STUDENT_LEVEL }, isActive: true, studentProfile: { programManagerId: pmId } } }),
         prisma.user.count({ where: { isActive: true, managerId: pmId } }),

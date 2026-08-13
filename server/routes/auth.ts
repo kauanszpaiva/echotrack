@@ -10,7 +10,7 @@ const router = Router();
 
 // Setup de conta via invite token
 router.post('/setup-account', async (req, res) => {
-  const parsed = setupAccountSchema.safeParse(req.body);
+  const parsed = setupAccountSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -60,7 +60,7 @@ router.post('/setup-account', async (req, res) => {
 
 // Signup de estudante
 router.post('/signup', async (req, res) => {
-  const parsed = signupSchema.safeParse(req.body);
+  const parsed = signupSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }

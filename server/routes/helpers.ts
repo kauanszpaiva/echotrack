@@ -1,5 +1,5 @@
 // Helpers compartilhados entre os módulos de rotas
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 /** Recursively strips password and inviteToken from any object/array before sending to client */
 export function omitSensitive(obj: any): any {

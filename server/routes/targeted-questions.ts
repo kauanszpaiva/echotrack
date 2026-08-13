@@ -12,21 +12,21 @@ const router = Router();
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const where: any = { isActive: true };
-    if (isStudentLevel(req.user.role)) {
-      where.studentId = req.user.id;
-    } else if (req.user.role === 'PROGRAM_MANAGER') {
+    if (isStudentLevel((req as any).user.role)) {
+      where.studentId = (req as any).user.id;
+    } else if ((req as any).user.role === 'PROGRAM_MANAGER') {
       const students = await prisma.user.findMany({
-        where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: req.user.id } },
+        where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: (req as any).user.id } },
         select: { id: true }
       });
       where.studentId = { in: students.map((s) => s.id) };
-    } else if (isCoachLevel(req.user.role)) {
+    } else if (isCoachLevel((req as any).user.role)) {
       const students = await prisma.user.findMany({
-        where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: req.user.id } },
+        where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: (req as any).user.id } },
         select: { id: true }
       });
       where.studentId = { in: students.map((s) => s.id) };
-    } else if (!isAdminLevel(req.user.role)) {
+    } else if (!isAdminLevel((req as any).user.role)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -42,7 +42,7 @@ router.get('/', authMiddleware, async (req, res) => {
 
 // Criar pergunta direcionada
 router.post('/', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
-  const parsed = targetedQuestionSchema.safeParse(req.body);
+  const parsed = targetedQuestionSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -56,14 +56,14 @@ router.post('/', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), a
       return res.status(400).json({ error: 'Invalid student selected' });
     }
 
-    if (req.user.role === 'PROGRAM_MANAGER') {
-      if (student?.studentProfile?.programManagerId !== req.user.id) {
+    if ((req as any).user.role === 'PROGRAM_MANAGER') {
+      if (student?.studentProfile?.programManagerId !== (req as any).user.id) {
         return res.status(403).json({ error: 'Unauthorized to target this student' });
       }
     }
 
     const created = await prisma.targetedQuestion.create({
-      data: { question, studentId, cycleId: cycleId || null, creatorId: req.user.id }
+      data: { question, studentId, cycleId: cycleId || null, creatorId: (req as any).user.id }
     });
     res.json(created);
   } catch (e: any) {
@@ -74,11 +74,11 @@ router.post('/', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), a
 // Deletar pergunta direcionada (soft delete)
 router.delete('/', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     const q = await prisma.targetedQuestion.findUnique({ where: { id: String(id) } });
     if (!q) return res.status(404).json({ error: 'Not found' });
 
-    if (req.user.role === 'PROGRAM_MANAGER' && q.creatorId !== req.user.id) {
+    if ((req as any).user.role === 'PROGRAM_MANAGER' && q.creatorId !== (req as any).user.id) {
       return res.status(403).json({ error: 'Unauthorized to delete this question' });
     }
 

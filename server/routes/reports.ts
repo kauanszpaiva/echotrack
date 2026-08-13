@@ -11,7 +11,7 @@ const router = Router();
 
 // Criar ou atualizar relatório do estudante
 router.post('/', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) => {
-  const parsed = weeklyReportSchema.safeParse(req.body);
+  const parsed = weeklyReportSchema.safeParse((req as any).body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
@@ -72,7 +72,7 @@ router.post('/', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) =
       if (!PERFORMANCE_LEVELS.has(rating.rating)) {
         return res.status(400).json({ error: 'Invalid class rating value' });
       }
-      classRatings.set(rating.classId, rating);
+      classRatings.set(rating.classId, { classId: rating.classId, rating: rating.rating, comment: rating.comment ?? null });
     }
 
     // Validate targeted answers
@@ -197,7 +197,7 @@ router.post('/', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) =
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const report = await prisma.weeklyReport.findUnique({
-      where: { id: req.params.id },
+      where: { id: (req as any).params.id },
       include: {
         student: { include: { studentProfile: { include: { coach: true, programManager: true, pathway: true, classEnrollments: { include: { classModel: true } } } } } },
         cycle: true,
@@ -208,7 +208,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     });
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
-    const reqUser = req.user;
+    const reqUser = (req as any).user;
     let authorized = false;
     if (isAdminLevel(reqUser.role)) authorized = true;
     else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
@@ -229,7 +229,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 // Marcar relatório como revisado
 router.patch('/:id/review', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH']), async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = (req as any).params;
     const report = await prisma.weeklyReport.findUnique({
       where: { id },
       include: { student: { include: { studentProfile: true } } }
@@ -239,7 +239,7 @@ router.patch('/:id/review', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MA
       return res.status(400).json({ error: 'Only submitted reports can be marked as reviewed' });
     }
 
-    const reqUser = req.user;
+    const reqUser = (req as any).user;
     let authorized = false;
     if (isAdminLevel(reqUser.role)) authorized = true;
     else if (isCoachLevel(reqUser.role) && report.student.studentProfile?.coachId === reqUser.id) authorized = true;
@@ -257,18 +257,18 @@ router.patch('/:id/review', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MA
 // Feedback no relatório
 router.post('/:id/feedback', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH']), async (req, res) => {
   try {
-    const text = req.body.text;
+    const text = (req as any).body.text;
     if (!text || typeof text !== 'string' || text.length < 1 || text.length > 4000) {
       return res.status(400).json({ error: 'Feedback text must be between 1 and 4000 characters' });
     }
 
     const report = await prisma.weeklyReport.findUnique({
-      where: { id: req.params.id },
+      where: { id: (req as any).params.id },
       include: { student: { include: { studentProfile: true } } }
     });
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
-    const reqUser = req.user;
+    const reqUser = (req as any).user;
     let authorized = false;
     if (isAdminLevel(reqUser.role)) authorized = true;
     else if (isCoachLevel(reqUser.role) && report.student.studentProfile?.coachId === reqUser.id) authorized = true;
@@ -277,7 +277,7 @@ router.post('/:id/feedback', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_M
     if (!authorized) return res.status(403).json({ error: 'Unauthorized to give feedback on this report' });
 
     const feedback = await prisma.coachFeedback.create({
-      data: { reportId: req.params.id, coachId: req.user.id, feedback: text }
+      data: { reportId: (req as any).params.id, coachId: (req as any).user.id, feedback: text }
     });
     res.json({ success: true, text, feedback });
   } catch (e: any) {
@@ -288,14 +288,14 @@ router.post('/:id/feedback', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_M
 // Exportar relatório em DOCX
 router.get('/export-docx', authMiddleware, async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     const report = await prisma.weeklyReport.findUnique({
       where: { id: String(id) },
       include: { student: { include: { studentProfile: { include: { classEnrollments: { include: { classModel: true } } } } } }, cycle: true, classRatings: true }
     });
     if (!report) return res.status(404).json({ error: 'Not found' });
 
-    const reqUser = req.user;
+    const reqUser = (req as any).user;
     let authorized = false;
     if (isAdminLevel(reqUser.role)) authorized = true;
     else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
@@ -312,7 +312,7 @@ router.get('/export-docx', authMiddleware, async (req, res) => {
     const filename = `EchoTrack_Report_${report.student.name.replace(/ /g, '_')}.docx`;
 
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'EXPORT', entityType: 'WeeklyReport', entityId: report.id, description: 'Exported DOCX' }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'EXPORT', entityType: 'WeeklyReport', entityId: report.id, description: 'Exported DOCX' }
     });
 
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -326,14 +326,14 @@ router.get('/export-docx', authMiddleware, async (req, res) => {
 // Exportar relatório em PDF
 router.get('/export-pdf', authMiddleware, async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id } = (req as any).query;
     const report = await prisma.weeklyReport.findUnique({
       where: { id: String(id) },
       include: { student: { include: { studentProfile: { include: { classEnrollments: { include: { classModel: true } } } } } }, cycle: true, classRatings: true }
     });
     if (!report) return res.status(404).json({ error: 'Not found' });
 
-    const reqUser = req.user;
+    const reqUser = (req as any).user;
     let authorized = false;
     if (isAdminLevel(reqUser.role)) authorized = true;
     else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
@@ -350,7 +350,7 @@ router.get('/export-pdf', authMiddleware, async (req, res) => {
     const filename = `EchoTrack_Report_${report.student.name.replace(/ /g, '_')}.pdf`;
 
     await prisma.auditLog.create({
-      data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'EXPORT', entityType: 'WeeklyReport', entityId: report.id, description: 'Exported PDF' }
+      data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'EXPORT', entityType: 'WeeklyReport', entityId: report.id, description: 'Exported PDF' }
     });
 
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
