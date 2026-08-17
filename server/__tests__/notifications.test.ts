@@ -1,11 +1,13 @@
 // Transactional email + scheduled reminders.
 //
-// The two properties under test are the ones that make retries safe:
-//   * `dispatch` sends at most once per dedupe key, enforced by the ledger's
-//     unique index rather than by in-process bookkeeping;
-//   * an email failure is recorded and swallowed — it never propagates into the
-//     request that triggered it, because a valid WSR submission must survive a
-//     mail outage.
+// The properties under test are the ones that make retries safe:
+//   * a confirmed SENT event is terminal for its application dedupe key;
+//   * transient/ambiguous provider failures may retry only while provider
+//     idempotency can still protect the send;
+//   * a no-op caused by missing mail configuration may retry later because no
+//     provider request was made;
+//   * an email failure is recorded and swallowed — it never invalidates the
+//     request that triggered it.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
@@ -25,9 +27,9 @@ process.env.CLERK_PUBLISHABLE_KEY = 'pk_test_stub';
 const { default: app } = await import('../app.js');
 const { dispatch, setEmailProvider } = await import('../email/dispatcher.js');
 const { reportReminder } = await import('../email/events.js');
-const { renderHtml } = await import('../email/resendProvider.js');
+const { renderHtml, ResendEmailProvider, resendIdempotencyKey } = await import('../email/resendProvider.js');
 
-/** Records every send instead of calling Resend. */
+/** Records every provider call instead of calling Resend. */
 function fakeProvider(outcome: any = { status: 'SENT', providerMessageId: 'msg_1' }) {
   const sent: any[] = [];
   setEmailProvider({
@@ -48,11 +50,14 @@ beforeEach(() => {
   resetPrismaMock();
   resetStore([]);
   delete process.env.CRON_SECRET;
+  delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
+  delete process.env.EMAIL_REPLY_TO;
   process.env.APP_BASE_URL = 'https://echotrack.example';
   fakeProvider();
 });
 
-// ── 1. Deduplication ───────────────────────────────────────────────────────
+// ── 1. Deduplication + retry semantics ─────────────────────────────────────
 
 describe('dispatch deduplication', () => {
   it('sends once for a given dedupe key', async () => {
@@ -62,9 +67,10 @@ describe('dispatch deduplication', () => {
     expect(result.status).toBe('SENT');
     expect(sent).toHaveLength(1);
     expect(tables.notificationDispatch).toHaveLength(1);
+    expect(tables.notificationDispatch[0].attempts).toBe(1);
   });
 
-  it('skips a second dispatch with the same key instead of re-sending', async () => {
+  it('skips a second dispatch after a confirmed send', async () => {
     const sent = fakeProvider();
 
     await dispatch(reportReminder(recipient, cycle));
@@ -72,7 +78,7 @@ describe('dispatch deduplication', () => {
 
     expect(second.status).toBe('SKIPPED');
     expect(second.reason).toBe('already dispatched');
-    expect(sent).toHaveLength(1); // still one — the ledger blocked the repeat
+    expect(sent).toHaveLength(1);
     expect(tables.notificationDispatch).toHaveLength(1);
   });
 
@@ -84,13 +90,94 @@ describe('dispatch deduplication', () => {
 
     expect(sent).toHaveLength(2);
   });
+
+  it('retries a transient provider failure inside the provider idempotency window', async () => {
+    let calls = 0;
+    const sent = fakeProvider(() => {
+      calls += 1;
+      return calls === 1
+        ? { status: 'FAILED', error: 'temporary provider failure', retryable: true, providerAttempted: true }
+        : { status: 'SENT', providerMessageId: 'msg_retry' };
+    });
+
+    const first = await dispatch(reportReminder(recipient, cycle));
+    const second = await dispatch(reportReminder(recipient, cycle));
+
+    expect(first.status).toBe('FAILED');
+    expect(second.status).toBe('SENT');
+    expect(sent).toHaveLength(2);
+    expect(tables.notificationDispatch).toHaveLength(1);
+    expect(tables.notificationDispatch[0].attempts).toBe(2);
+    expect(tables.notificationDispatch[0].status).toBe('SENT');
+  });
+
+  it('does not retry a provider failure classified as non-retryable', async () => {
+    const sent = fakeProvider({
+      status: 'FAILED',
+      error: 'Resend responded 422',
+      retryable: false,
+      providerAttempted: true,
+    });
+
+    const first = await dispatch(reportReminder(recipient, cycle));
+    const second = await dispatch(reportReminder(recipient, cycle));
+
+    expect(first.status).toBe('FAILED');
+    expect(second.status).toBe('SKIPPED');
+    expect(second.reason).toBe('previous attempt is not retryable');
+    expect(sent).toHaveLength(1);
+  });
+
+  it('retries a configuration skip later because no provider request occurred', async () => {
+    fakeProvider({
+      status: 'SKIPPED',
+      reason: 'mail provider is not configured',
+      retryable: true,
+      providerAttempted: false,
+    });
+
+    const first = await dispatch(reportReminder(recipient, cycle));
+    expect(first.status).toBe('SKIPPED');
+
+    const sent = fakeProvider({ status: 'SENT', providerMessageId: 'msg_after_config' });
+    const second = await dispatch(reportReminder(recipient, cycle));
+
+    expect(second.status).toBe('SENT');
+    expect(sent).toHaveLength(1);
+    expect(tables.notificationDispatch[0].attempts).toBe(2);
+  });
+
+  it('refuses an ambiguous retry after the provider idempotency window', async () => {
+    const event = reportReminder(recipient, cycle);
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    seedTable('notificationDispatch', [
+      {
+        id: 'dispatch-stale',
+        dedupeKey: event.dedupeKey,
+        eventType: event.type,
+        recipientEmail: recipient.email,
+        status: 'PENDING',
+        attempts: 1,
+        payload: JSON.stringify({ retryable: true, providerAttempted: true }),
+        createdAt: stale,
+        updatedAt: stale,
+      },
+    ]);
+    const sent = fakeProvider();
+
+    const result = await dispatch(event);
+
+    expect(result.status).toBe('SKIPPED');
+    expect(result.reason).toMatch(/reconciliation required/);
+    expect(sent).toHaveLength(0);
+  });
 });
 
 // ── 2. Failure isolation ───────────────────────────────────────────────────
 
 describe('dispatch failure handling', () => {
   it('records a provider failure without throwing', async () => {
-    fakeProvider({ status: 'FAILED', error: 'Resend responded 500' });
+    fakeProvider({ status: 'FAILED', error: 'Resend responded 500', retryable: true, providerAttempted: true });
 
     const result = await dispatch(reportReminder(recipient, cycle));
 
@@ -99,16 +186,17 @@ describe('dispatch failure handling', () => {
     expect(tables.notificationDispatch[0].error).toMatch(/500/);
   });
 
-  it('does not throw when the provider itself throws', async () => {
+  it('does not throw or persist the provider exception text when the provider itself throws', async () => {
     setEmailProvider({
       name: 'exploding',
       async send() {
-        throw new Error('socket hang up');
+        throw new Error('socket hang up for s1@kspdominion.group');
       },
     });
 
     await expect(dispatch(reportReminder(recipient, cycle))).resolves.toMatchObject({ status: 'FAILED' });
-    expect(tables.notificationDispatch[0].error).toMatch(/socket hang up/);
+    expect(tables.notificationDispatch[0].error).toBe('email provider threw before a definitive response');
+    expect(tables.notificationDispatch[0].error).not.toContain(recipient.email);
   });
 
   it('skips a recipient with no email address', async () => {
@@ -120,9 +208,9 @@ describe('dispatch failure handling', () => {
   });
 });
 
-// ── 3. Rendering ───────────────────────────────────────────────────────────
+// ── 3. Resend adapter + rendering ──────────────────────────────────────────
 
-describe('html rendering', () => {
+describe('Resend adapter', () => {
   it('escapes content rather than interpolating it raw', () => {
     const html = renderHtml({
       type: 'REPORT_REMINDER',
@@ -139,6 +227,54 @@ describe('html rendering', () => {
   it('builds an absolute action link from APP_BASE_URL', () => {
     const event = reportReminder(recipient, cycle);
     expect(event.actionUrl).toBe('https://echotrack.example/student/report');
+  });
+
+  it('sends a deterministic provider idempotency key instead of the raw event key', async () => {
+    process.env.RESEND_API_KEY = 're_test_stub';
+    process.env.EMAIL_FROM = 'EchoTrack <no-reply@example.com>';
+    const event = reportReminder(recipient, cycle);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'msg_resend' }),
+      text: async () => '',
+    }));
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    try {
+      const outcome = await new ResendEmailProvider().send(event);
+      expect(outcome).toMatchObject({ status: 'SENT', providerMessageId: 'msg_resend' });
+      const init = fetchMock.mock.calls[0][1] as any;
+      const key = init.headers['Idempotency-Key'];
+      expect(key).toBe(resendIdempotencyKey(event));
+      expect(key).toMatch(/^echotrack\/[a-f0-9]{64}$/);
+      expect(key).not.toContain(event.dedupeKey);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not persist raw Resend error bodies that may contain recipient PII', async () => {
+    process.env.RESEND_API_KEY = 're_test_stub';
+    process.env.EMAIL_FROM = 'EchoTrack <no-reply@example.com>';
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => null,
+      text: async () => JSON.stringify({ name: 'internal_server_error', message: `failed for ${recipient.email}` }),
+    }));
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    try {
+      const outcome = await new ResendEmailProvider().send(reportReminder(recipient, cycle));
+      expect(outcome).toMatchObject({ status: 'FAILED', retryable: true, providerAttempted: true });
+      if (outcome.status === 'FAILED') {
+        expect(outcome.error).toBe('Resend responded 500 (internal_server_error)');
+        expect(outcome.error).not.toContain(recipient.email);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
