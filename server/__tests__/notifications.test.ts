@@ -233,7 +233,7 @@ describe('Resend adapter', () => {
     process.env.RESEND_API_KEY = 're_test_stub';
     process.env.EMAIL_FROM = 'EchoTrack <no-reply@example.com>';
     const event = reportReminder(recipient, cycle);
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: any, _init: any) => ({
       ok: true,
       status: 200,
       json: async () => ({ id: 'msg_resend' }),
@@ -257,7 +257,7 @@ describe('Resend adapter', () => {
   it('does not persist raw Resend error bodies that may contain recipient PII', async () => {
     process.env.RESEND_API_KEY = 're_test_stub';
     process.env.EMAIL_FROM = 'EchoTrack <no-reply@example.com>';
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: any, _init: any) => ({
       ok: false,
       status: 500,
       json: async () => null,
