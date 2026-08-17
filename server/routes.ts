@@ -9,6 +9,8 @@ import adminRoutes from './routes/admin.js';
 import roleRoutes from './routes/roles.js';
 import conductRoutes from './routes/conduct.js';
 import targetedQuestionRoutes from './routes/targeted-questions.js';
+import engagementRoutes from './routes/engagement.js';
+import cronRoutes from './routes/cron.js';
 
 const router = Router();
 
@@ -29,6 +31,12 @@ router.use('/conduct', conductRoutes);
 
 // Targeted questions routes
 router.use('/targeted-questions', targetedQuestionRoutes);
+
+// Student engagement domain (check-ins, goals, templates, annotations)
+router.use('/', engagementRoutes);
+
+// Scheduled jobs — authenticated by CRON_SECRET, not by a user session.
+router.use('/cron', cronRoutes);
 
 // Session route
 router.get('/auth/session', authMiddleware, async (req, res) => {

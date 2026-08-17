@@ -128,6 +128,67 @@ export const reviewReportSchema = z.object({
   feedback: z.string().min(1).max(5000).optional(),
 });
 
+// ── Student engagement ─────────────────────────────────────────────────────
+
+export const dailyCheckInSchema = z.object({
+  moodEmoji: z.string().min(1).max(16),
+  moodLabel: z.string().max(64).optional().nullable(),
+  energyLevel: z.number().int().min(1).max(10),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+export const weeklyGoalSchema = z.object({
+  title: z.string().min(1).max(256),
+  description: z.string().max(2000).optional().nullable(),
+  category: z.enum(['ACADEMIC', 'PERSONAL', 'CAREER']).optional().default('ACADEMIC'),
+  cycleId: z.string().min(1).max(128).optional().nullable(),
+  reportId: z.string().min(1).max(128).optional().nullable(),
+});
+
+export const updateWeeklyGoalSchema = z.object({
+  title: z.string().min(1).max(256).optional(),
+  description: z.string().max(2000).optional().nullable(),
+  category: z.enum(['ACADEMIC', 'PERSONAL', 'CAREER']).optional(),
+  status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED', 'NOT_COMPLETED']).optional(),
+});
+
+export const studentTemplateSchema = z.object({
+  title: z.string().min(1).max(256),
+  type: z.string().min(1).max(64),
+  content: z.string().min(1).max(10000),
+});
+
+export const coachingGoalSchema = z.object({
+  studentId: z.string().min(1).max(128),
+  title: z.string().min(1).max(256),
+  description: z.string().max(2000).optional().nullable(),
+  deadline: z.string().datetime().optional().nullable(),
+});
+
+export const updateCoachingGoalSchema = z.object({
+  title: z.string().min(1).max(256).optional(),
+  description: z.string().max(2000).optional().nullable(),
+  status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']).optional(),
+  deadline: z.string().datetime().optional().nullable(),
+});
+
+export const annotationSchema = z.object({
+  reportId: z.string().min(1).max(128),
+  section: z.string().min(1).max(128),
+  note: z.string().min(1).max(4000),
+});
+
+export const classChangeRequestSchema = z.object({
+  classId: z.string().min(1).max(128),
+  action: z.enum(['ADD', 'DROP']),
+  reason: z.string().max(2000).optional().nullable(),
+});
+
+export const decideClassChangeSchema = z.object({
+  status: z.enum(['APPROVED', 'DENIED']),
+  decisionNote: z.string().max(2000).optional().nullable(),
+});
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type SetupAccountInput = z.infer<typeof setupAccountSchema>;
 export type RegisterStaffInput = z.infer<typeof registerStaffSchema>;
