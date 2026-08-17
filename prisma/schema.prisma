@@ -19,20 +19,20 @@ model User {
   /// all their existing relations. Null until the user first signs in.
   clerkUserId String? @unique @map("clerk_user_id")
 
-  email String @unique
+  email         String    @unique
   /// DEPRECATED — never read or written by authentication. Clerk owns passwords.
   /// Kept as an empty-string column so no destructive migration is needed; drop
   /// it in a dedicated migration once every environment is confirmed clean.
-  password      String   @default("")
+  password      String    @default("")
   name          String
-  role          String   @default("STUDENT") // Admin, Program_Manager, etc.
-  accountStatus String   @default("ACTIVE") @map("account_status")
-  inviteToken   String?  @unique @map("invite_token")
+  role          String    @default("STUDENT") // Admin, Program_Manager, etc.
+  accountStatus String    @default("ACTIVE") @map("account_status")
+  inviteToken   String?   @unique @map("invite_token")
   inviteExpires DateTime? @map("invite_expires_at")
-  avatarUrl     String?  @map("avatar_url")
-  isActive      Boolean  @default(true) @map("is_active")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  avatarUrl     String?   @map("avatar_url")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   managerId    String? @map("manager_id")
   manager      User?   @relation("ManagedStaff", fields: [managerId], references: [id], onDelete: SetNull)
@@ -56,6 +56,23 @@ model User {
   conductEntriesAuthored   ConductEntry[]     @relation("ConductEntryAuthor")
   conductEntriesReviewed   ConductEntry[]     @relation("ConductEntryReviewer")
   conductEntriesReceived   ConductEntry[]     @relation("ConductEntryStudent")
+
+  // Student engagement domain
+  dailyCheckIns          DailyCheckIn[]       @relation("StudentCheckIns")
+  weeklyGoals            WeeklyGoal[]         @relation("StudentWeeklyGoals")
+  studentTemplates       StudentTemplate[]
+  classChangeRequests    ClassChangeRequest[] @relation("StudentClassRequests")
+  classRequestsDecided   ClassChangeRequest[] @relation("ClassRequestDecidedBy")
+  coachingGoalsAsStudent CoachingGoal[]       @relation("CoachingGoalsStudent")
+  coachingGoalsAsCoach   CoachingGoal[]       @relation("CoachingGoalsCoach")
+  annotationsAuthored    Annotation[]         @relation("AnnotationAuthor")
+
+  // Classroom staffing
+  classStaffMemberships ClassStaffMembership[]
+
+  // Chat
+  chatMemberships  ChatChannelMember[]
+  sentChatMessages ChatMessage[]       @relation("SentChatMessages")
 
   @@map("users")
 }
@@ -125,6 +142,8 @@ model ClassModel {
   pathway                 Pathway                  @relation(fields: [pathwayId], references: [id], onDelete: Cascade)
   classRatings            ClassRating[]
   studentClassEnrollments StudentClassEnrollment[]
+  staffMemberships        ClassStaffMembership[]
+  changeRequests          ClassChangeRequest[]     @relation("ClassRequests")
 
   @@map("classes")
 }
@@ -177,6 +196,7 @@ model ReportCycle {
   pathway           Pathway?           @relation(fields: [pathwayId], references: [id], onDelete: SetNull)
   weeklyReports     WeeklyReport[]
   targetedQuestions TargetedQuestion[]
+  weeklyGoals       WeeklyGoal[]
 
   @@map("report_cycles")
 }
@@ -215,6 +235,8 @@ model WeeklyReport {
   classRatings    ClassRating[]
   coachFeedback   CoachFeedback[]
   targetedAnswers TargetedAnswer[]
+  annotations     Annotation[]
+  weeklyGoals     WeeklyGoal[]
 
   @@unique([studentId, cycleId])
   @@index([studentId])
@@ -349,4 +371,235 @@ model AppSettings {
   updatedAt            DateTime @updatedAt @map("updated_at")
 
   @@map("app_settings")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// STUDENT ENGAGEMENT DOMAIN
+// Ported from the AI Studio export. Every model here is additive: no existing
+// table, column or relation is modified.
+// ════════════════════════════════════════════════════════════════════════════
+
+model DailyCheckIn {
+  id          String   @id @default(cuid())
+  studentId   String   @map("student_id")
+  moodEmoji   String   @map("mood_emoji")
+  moodLabel   String?  @map("mood_label")
+  energyLevel Int      @default(5) @map("energy_level")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  student User @relation("StudentCheckIns", fields: [studentId], references: [id], onDelete: Cascade)
+
+  /// Reads are always "this student's most recent check-ins" — the composite
+  /// index serves that ordering directly instead of sorting a student scan.
+  @@index([studentId, createdAt])
+  @@map("daily_check_ins")
+}
+
+model WeeklyGoal {
+  id          String   @id @default(cuid())
+  studentId   String   @map("student_id")
+  cycleId     String?  @map("cycle_id")
+  reportId    String?  @map("report_id")
+  category    String   @default("ACADEMIC") // ACADEMIC | PERSONAL | CAREER
+  title       String
+  description String?
+  status      String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | NOT_COMPLETED
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  student User          @relation("StudentWeeklyGoals", fields: [studentId], references: [id], onDelete: Cascade)
+  cycle   ReportCycle?  @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  report  WeeklyReport? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, createdAt])
+  @@index([cycleId])
+  @@index([reportId])
+  @@map("weekly_goals")
+}
+
+model StudentTemplate {
+  id        String   @id @default(cuid())
+  studentId String   @map("student_id")
+  title     String
+  type      String
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@map("student_templates")
+}
+
+model CoachingGoal {
+  id          String    @id @default(cuid())
+  studentId   String    @map("student_id")
+  coachId     String    @map("coach_id")
+  title       String
+  description String?
+  status      String    @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED
+  deadline    DateTime?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  student User @relation("CoachingGoalsStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  coach   User @relation("CoachingGoalsCoach", fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([coachId])
+  @@map("coaching_goals")
+}
+
+model Annotation {
+  id        String   @id @default(cuid())
+  reportId  String   @map("report_id")
+  authorId  String?  @map("author_id")
+  section   String
+  note      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  report WeeklyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  /// The AI Studio model had no author. Internal staff notes are attributable by
+  /// policy, so authorship is recorded here; nullable so the column can be added
+  /// without a backfill.
+  author User?        @relation("AnnotationAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([reportId])
+  @@map("annotations")
+}
+
+model ClassChangeRequest {
+  id           String    @id @default(cuid())
+  studentId    String    @map("student_id")
+  classId      String    @map("class_id")
+  action       String // ADD | DROP
+  status       String    @default("PENDING") // PENDING | APPROVED | DENIED
+  reason       String?
+  decidedById  String?   @map("decided_by_id")
+  decidedAt    DateTime? @map("decided_at")
+  decisionNote String?   @map("decision_note")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  student    User       @relation("StudentClassRequests", fields: [studentId], references: [id], onDelete: Cascade)
+  classModel ClassModel @relation("ClassRequests", fields: [classId], references: [id], onDelete: Cascade)
+  decidedBy  User?      @relation("ClassRequestDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+  @@index([classId])
+  @@index([status])
+  @@map("class_change_requests")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CLASSROOM STAFFING
+// The authorization anchor for instructor access: membership, not role claim.
+// ════════════════════════════════════════════════════════════════════════════
+
+model ClassStaffMembership {
+  id          String    @id @default(cuid())
+  classId     String    @map("class_id")
+  userId      String    @map("user_id")
+  staffRole   String    @default("PRIMARY_INSTRUCTOR") @map("staff_role")
+  status      String    @default("ACTIVE") // ACTIVE | REMOVED
+  isPrimary   Boolean   @default(false) @map("is_primary")
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  removedAt   DateTime? @map("removed_at")
+
+  classModel ClassModel @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, classId, staffRole])
+  @@index([classId, status])
+  @@index([userId, status])
+  @@map("class_staff_memberships")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CHAT
+// ChatChannelMember has no counterpart in the AI Studio export, where channel
+// access was decided by an `isPrivate` flag alone. The brief requires
+// "channel membership obrigatório" — membership is modelled explicitly so a
+// read can be authorized against a row rather than a boolean.
+// ════════════════════════════════════════════════════════════════════════════
+
+model ChatChannel {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  topic       String?
+  isPrivate   Boolean  @default(false) @map("is_private")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members  ChatChannelMember[]
+  messages ChatMessage[]
+
+  @@map("chat_channels")
+}
+
+model ChatChannelMember {
+  id         String    @id @default(cuid())
+  channelId  String    @map("channel_id")
+  userId     String    @map("user_id")
+  role       String    @default("MEMBER") // MEMBER | MODERATOR
+  joinedAt   DateTime  @default(now()) @map("joined_at")
+  lastReadAt DateTime? @map("last_read_at")
+
+  channel ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@map("chat_channel_members")
+}
+
+model ChatMessage {
+  id        String    @id @default(cuid())
+  channelId String    @map("channel_id")
+  senderId  String    @map("sender_id")
+  content   String
+  reactions String?
+  editedAt  DateTime? @map("edited_at")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  channel ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sender  User        @relation("SentChatMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  /// Paginating a channel is always "newest first within this channel".
+  @@index([channelId, createdAt])
+  @@index([senderId])
+  @@map("chat_messages")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// NOTIFICATION DISPATCH
+// Deduplication ledger for transactional email. `dedupeKey` is the idempotency
+// guarantee: a reminder for (user, event, period) can only be sent once, so a
+// cron retry or a double invocation cannot re-send.
+// ════════════════════════════════════════════════════════════════════════════
+
+model NotificationDispatch {
+  id                String    @id @default(cuid())
+  dedupeKey         String    @unique @map("dedupe_key")
+  eventType         String    @map("event_type")
+  channel           String    @default("EMAIL")
+  recipientId       String?   @map("recipient_id")
+  recipientEmail    String    @map("recipient_email")
+  status            String    @default("PENDING") // PENDING | SENT | FAILED | SKIPPED
+  providerMessageId String?   @map("provider_message_id")
+  error             String?
+  attempts          Int       @default(0)
+  payload           String?
+  sentAt            DateTime? @map("sent_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([eventType, status])
+  @@index([recipientId])
+  @@map("notification_dispatches")
 }
