@@ -24,9 +24,13 @@ export interface EmailEvent {
   type: EmailEventType;
   to: EmailRecipient;
   /**
-   * Idempotency key. Two events with the same key are delivered at most once,
-   * ever — enforced by a unique index on `notification_dispatches.dedupe_key`,
-   * not by in-process state. Include the period for anything recurring, e.g.
+   * Application-level idempotency key. Two events with the same key are one
+   * logical delivery, enforced by notification_dispatches.dedupe_key. The
+   * Resend adapter also derives its provider idempotency key from this value so
+   * an ambiguous network retry cannot create a duplicate provider send inside
+   * Resend's idempotency window.
+   *
+   * Include the period for recurring events, e.g.
    * `REPORT_REMINDER:<userId>:<cycleId>`.
    */
   dedupeKey: string;
@@ -40,8 +44,22 @@ export interface EmailEvent {
 
 export type EmailSendOutcome =
   | { status: 'SENT'; providerMessageId: string | null }
-  | { status: 'SKIPPED'; reason: string }
-  | { status: 'FAILED'; error: string };
+  | {
+      status: 'SKIPPED';
+      reason: string;
+      /** True only when a later attempt is both useful and safe. */
+      retryable?: boolean;
+      /** False when no provider request was made (for example missing config). */
+      providerAttempted?: boolean;
+    }
+  | {
+      status: 'FAILED';
+      error: string;
+      /** True for transient/ambiguous failures that may be retried safely. */
+      retryable?: boolean;
+      /** Normally true for provider/network failures. */
+      providerAttempted?: boolean;
+    };
 
 /** The provider seam. `ResendEmailProvider` in production, a fake in tests. */
 export interface EmailProvider {
