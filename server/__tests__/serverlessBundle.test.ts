@@ -83,7 +83,8 @@ describe('Vercel serverless bundle', () => {
   it('reaches the API routes from the entry point', () => {
     // Sanity check on the walker itself: if this ever went to zero, the
     // assertions below would pass vacuously and guard nothing.
-    const relative = files.map((file) => path.relative(repoRoot, file));
+    // Normalize paths for cross-platform compatibility (Windows uses \)
+    const relative = files.map((file) => path.relative(repoRoot, file).split(path.sep).join('/'));
     expect(relative).toContain('server/app.ts');
     expect(relative).toContain('server/routes.ts');
     expect(relative.length).toBeGreaterThan(3);

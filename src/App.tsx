@@ -6,13 +6,11 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { RequireAuth, RequireRole } from './components/RouteGuards';
 import { AREA_ROLES, homePathForRole } from './lib/access';
 
-// Views
 import { Login } from './views/Auth/Login';
 import { SignUp } from './views/Auth/SignUp';
 import { SetupAccount } from './views/Auth/SetupAccount';
 import { AdminDashboard } from './views/Admin/AdminDashboard';
 import { DashboardLayout } from './views/Layouts/DashboardLayout';
-
 import { ProgramManagers } from './views/Admin/ProgramManagers';
 import { AllUsers } from './views/Admin/AllUsers';
 import { Pathways } from './views/Admin/Pathways';
@@ -29,9 +27,14 @@ import { ContractPoints } from './views/Admin/ContractPoints';
 import { DevPanel } from './views/Dev/DevPanel';
 import { StudentReportWizard } from './views/Student/StudentReportWizard';
 import { StudentDashboard } from './views/Student/StudentDashboard';
+import { StudentHistory } from './views/Student/StudentHistory';
 import { PMDashboard } from './views/PM/PMDashboard';
 import { CoachDashboard } from './views/Coach/CoachDashboard';
+import { CoachStudents } from './views/Coach/CoachStudents';
+import { CoachReports } from './views/Coach/CoachReports';
+import { CoachAlerts } from './views/Coach/CoachAlerts';
 import { InstructorDashboard } from './views/Instructor/InstructorDashboard';
+import { InstructorClasses } from './views/Instructor/InstructorClasses';
 import { ReportDetail } from './views/Admin/ReportDetail';
 import { ConductTracker } from './views/Conduct/ConductTracker';
 import { MemberProfile } from './views/Profile/MemberProfile';
@@ -58,7 +61,6 @@ export default function App() {
       <BrowserRouter>
         <Toaster position="top-right" />
         <Routes>
-          {/* Public */}
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
@@ -73,8 +75,6 @@ export default function App() {
             }
           />
 
-          {/* Authenticated. Each area additionally declares which roles may
-              enter it; the API enforces the same rules server-side. */}
           <Route element={<RequireAuth />}>
             <Route path="/dashboard-redirect" element={<DashboardRedirect />} />
 
@@ -88,7 +88,6 @@ export default function App() {
                 <Route path="/dev" element={<DevPanel />} />
               </Route>
 
-              {/* Admin-only */}
               <Route element={<RequireRole roles={AREA_ROLES.admin} />}>
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/staff" element={<ProgramManagers />} />
@@ -101,8 +100,6 @@ export default function App() {
                 <Route path="/admin/contract-points" element={<ContractPoints />} />
               </Route>
 
-              {/* Admin areas Program Managers also use (scoped server-side to
-                  their own students/staff). */}
               <Route element={<RequireRole roles={AREA_ROLES.adminShared} />}>
                 <Route path="/admin/users" element={<AllUsers />} />
                 <Route path="/admin/cohorts" element={<Cohorts />} />
@@ -123,6 +120,9 @@ export default function App() {
 
               <Route element={<RequireRole roles={AREA_ROLES.coach} />}>
                 <Route path="/coach" element={<CoachDashboard />} />
+                <Route path="/coach/students" element={<CoachStudents />} />
+                <Route path="/coach/reports" element={<CoachReports />} />
+                <Route path="/coach/alerts" element={<CoachAlerts />} />
                 <Route path="/coach/reports/:id" element={<ReportDetail />} />
               </Route>
 
@@ -132,6 +132,7 @@ export default function App() {
 
               <Route element={<RequireRole roles={AREA_ROLES.instructor} />}>
                 <Route path="/instructor" element={<InstructorDashboard />} />
+                <Route path="/instructor/classes" element={<InstructorClasses />} />
                 <Route path="/instructor/conduct" element={<ConductTracker />} />
                 <Route path="/instructor/reports/:id" element={<ReportDetail />} />
               </Route>
@@ -141,6 +142,7 @@ export default function App() {
                 <Route path="/student/report" element={<StudentReportWizard />} />
                 <Route path="/student/timesheet" element={<StudentTimesheet />} />
                 <Route path="/student/standing" element={<StudentStanding />} />
+                <Route path="/student/history" element={<StudentHistory />} />
                 <Route path="/student/reports/:id" element={<ReportDetail />} />
               </Route>
             </Route>

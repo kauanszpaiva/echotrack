@@ -50,6 +50,113 @@ function project(user: any, select?: Record<string, boolean>) {
   return Object.fromEntries(Object.keys(select).map((key) => [key, user[key]]));
 }
 
+/**
+ * Row store for every model other than `user` (which keeps its bespoke store
+ * because the identity-mirror tests reach into it directly).
+ */
+export const tables: Record<string, any[]> = {};
+
+export function seedTable(name: string, rows: any[]) {
+  tables[name] = rows.map((r) => ({ createdAt: new Date(), ...r }));
+}
+
+export function resetTables() {
+  for (const key of Object.keys(tables)) delete tables[key];
+}
+
+/** Supports the subset of Prisma `where` the ported handlers actually use. */
+function matchWhere(row: any, where: any = {}): boolean {
+  return Object.entries(where).every(([key, condition]) => {
+    if (condition === undefined) return true;
+    if (condition && typeof condition === 'object' && !(condition instanceof Date)) {
+      const c: any = condition;
+      if (Array.isArray(c.in)) return c.in.includes(row[key]);
+      if (c.gte !== undefined) return row[key] >= c.gte;
+      if (c.lte !== undefined) return row[key] <= c.lte;
+      // Relation filters (e.g. `studentProfile: { pathwayId }`) are not modelled;
+      // treat them as satisfied so the surrounding scalar conditions still apply.
+      return true;
+    }
+    return row[key] === condition;
+  });
+}
+
+function applyOrder(rows: any[], orderBy: any) {
+  if (!orderBy) return rows;
+  const [field, direction] = Object.entries(orderBy)[0] as [string, string];
+  return [...rows].sort((a, b) => {
+    const av = a[field];
+    const bv = b[field];
+    if (av === bv) return 0;
+    return (av > bv ? 1 : -1) * (direction === 'desc' ? -1 : 1);
+  });
+}
+
+/**
+ * An in-memory Prisma model delegate.
+ *
+ * `include` is not simulated — seed the related object directly on the row when
+ * a handler reads through one (e.g. `annotation.report.studentId`).
+ */
+function collection(name: string) {
+  const rows = () => (tables[name] ??= []);
+  return {
+    findUnique: vi.fn(async ({ where, select }: any) => {
+      guard();
+      return project(rows().find((r) => matchWhere(r, where)), select);
+    }),
+    findFirst: vi.fn(async ({ where, select }: any = {}) => {
+      guard();
+      return project(rows().find((r) => matchWhere(r, where)), select);
+    }),
+    findMany: vi.fn(async ({ where, select, orderBy, take, skip }: any = {}) => {
+      guard();
+      let found = rows().filter((r) => matchWhere(r, where));
+      found = applyOrder(found, orderBy);
+      if (skip) found = found.slice(skip);
+      if (take) found = found.slice(0, take);
+      return found.map((r) => project(r, select));
+    }),
+    create: vi.fn(async ({ data, select }: any) => {
+      guard();
+      const uniques = uniqueFields[name] ?? [];
+      for (const field of uniques) {
+        if (data[field] !== undefined && rows().some((r) => r[field] === data[field])) {
+          const err: any = new Error('Unique constraint failed');
+          err.code = 'P2002';
+          throw err;
+        }
+      }
+      const created = { id: `${name}-${rows().length + 1}`, createdAt: new Date(), ...data };
+      rows().push(created);
+      return project(created, select);
+    }),
+    update: vi.fn(async ({ where, data, select }: any) => {
+      guard();
+      const row = rows().find((r) => matchWhere(r, where));
+      if (!row) throw new Error(`Record to update not found in ${name}`);
+      Object.assign(row, data);
+      return project(row, select);
+    }),
+    delete: vi.fn(async ({ where }: any) => {
+      guard();
+      const index = rows().findIndex((r) => matchWhere(r, where));
+      if (index === -1) throw new Error(`Record to delete not found in ${name}`);
+      return rows().splice(index, 1)[0];
+    }),
+    count: vi.fn(async ({ where }: any = {}) => {
+      guard();
+      return rows().filter((r) => matchWhere(r, where)).length;
+    }),
+    groupBy: vi.fn(async () => { guard(); return []; }),
+  };
+}
+
+/** Columns carrying a UNIQUE constraint, so create() can raise P2002 like Postgres. */
+const uniqueFields: Record<string, string[]> = {
+  notificationDispatch: ['dedupeKey'],
+};
+
 export const prismaMock = {
   user: {
     findUnique: vi.fn(async ({ where, select }: any) => {
@@ -105,34 +212,36 @@ export const prismaMock = {
     create: vi.fn(async () => ({})),
     findMany: vi.fn(async () => { guard(); return []; }),
   },
-  conductEntry: { findMany: vi.fn(async () => []) },
-  classModel: {
-    findMany: vi.fn(async () => { guard(); return []; }),
-    count: vi.fn(async () => { guard(); return 0; }),
-  },
-  studentProfile: { findUnique: vi.fn(async () => null) },
-  reportCycle: {
-    findFirst: vi.fn(async () => { guard(); return null; }),
-    count: vi.fn(async () => { guard(); return 0; }),
-  },
-  weeklyReport: {
-    findMany: vi.fn(async () => { guard(); return []; }),
-    count: vi.fn(async () => { guard(); return 0; }),
-    groupBy: vi.fn(async () => { guard(); return []; }),
-  },
-  alert: {
-    count: vi.fn(async () => { guard(); return 0; }),
-    groupBy: vi.fn(async () => { guard(); return []; }),
-  },
-  classRating: { findMany: vi.fn(async () => { guard(); return []; }) },
-  pathway: { count: vi.fn(async () => { guard(); return 0; }) },
+  conductEntry: collection('conductEntry'),
+  classModel: collection('classModel'),
+  studentProfile: collection('studentProfile'),
+  reportCycle: collection('reportCycle'),
+  weeklyReport: collection('weeklyReport'),
+  alert: collection('alert'),
+  classRating: collection('classRating'),
+  pathway: collection('pathway'),
   appSettings: {
     findUnique: vi.fn(async () => ({ id: 'singleton' })),
     create: vi.fn(async () => ({ id: 'singleton' })),
   },
+  // ── Student engagement domain ────────────────────────────────────────────
+  // Backed by `tables`, so a test can seed rows and assert on what a handler
+  // wrote without standing up Postgres.
+  dailyCheckIn: collection('dailyCheckIn'),
+  weeklyGoal: collection('weeklyGoal'),
+  studentTemplate: collection('studentTemplate'),
+  coachingGoal: collection('coachingGoal'),
+  annotation: collection('annotation'),
+  classChangeRequest: collection('classChangeRequest'),
+  classStaffMembership: collection('classStaffMembership'),
+  studentClassEnrollment: collection('studentClassEnrollment'),
+  community: collection('community'),
+  chatChannelMember: collection('chatChannelMember'),
+  notificationDispatch: collection('notificationDispatch'),
 };
 
 export function resetPrismaMock() {
+  resetTables();
   Object.values(prismaMock).forEach((model: any) =>
     Object.values(model).forEach((fn: any) => fn.mockClear?.()),
   );

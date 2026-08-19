@@ -74,6 +74,16 @@ CLERK_SECRET_KEY='sk_…' DEV_ADMIN_PASSWORD='a-strong-password' npm run db:seed
 Or create the user manually in the **Clerk Dashboard → Users**, then set
 `publicMetadata` to `{"role":"ADMIN"}`.
 
+To also seed one login per remaining role (Dev, Program Manager, Coach, PSM,
+Instructor, Student, Intern) — useful for exercising every dashboard locally —
+add `DEV_SEED_PASSWORD`; the whole set shares that password. Leave it unset in
+production.
+
+```bash
+CLERK_SECRET_KEY='sk_…' DEV_ADMIN_PASSWORD='a-strong-password' \
+  DEV_SEED_PASSWORD='a-strong-password' npm run db:seed
+```
+
 To link an existing set of Postgres users to Clerk identities in one pass
 (idempotent, non-destructive; dry run by default):
 

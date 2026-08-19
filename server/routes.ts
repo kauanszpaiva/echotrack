@@ -1,3 +1,4 @@
+// Router principal - agrega todos os sub-routers
 import { Router } from 'express';
 import crypto from 'crypto';
 import { authMiddleware, AuthRequest, roleMiddleware } from './auth.js';
@@ -5,224 +6,34 @@ import prisma from './prisma.js';
 import { isAdminLevel, isCoachLevel, isStudentLevel, STUDENT_LEVEL, COACH_LEVEL } from '../shared/roles.js';
 import { provisionClerkUser, deleteClerkUser } from './clerkAdmin.js';
 import { loadRoutingProfile, routingFor, servesStudent } from './phaseRouting.js';
+import { authMiddleware } from './auth.js';
+
+// Sub-routers
+import authRoutes from './routes/auth.js';
+import reportRoutes from './routes/reports.js';
+import adminRoutes from './routes/admin.js';
+import roleRoutes from './routes/roles.js';
+import conductRoutes from './routes/conduct.js';
+import targetedQuestionRoutes from './routes/targeted-questions.js';
+import engagementRoutes from './routes/engagement.js';
+import cronRoutes from './routes/cron.js';
 
 const router = Router();
 
-// Recursively strips password and inviteToken from any object/array before sending to client
-function omitSensitive(obj: any): any {
-  if (!obj || typeof obj !== 'object') return obj;
-  if (obj instanceof Date) return obj;
-  if (Array.isArray(obj)) return obj.map(omitSensitive);
-  const { password, inviteToken, ...rest } = obj;
-  return Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, omitSensitive(v)]));
-}
+// Auth routes (setup-account, signup)
+router.use('/', authRoutes);
 
-function httpError(status: number, message: string) {
-  const error = new Error(message) as Error & { status: number };
-  error.status = status;
-  return error;
-}
+// Report routes (weekly reports, export)
+router.use('/reports', reportRoutes);
 
-function optionalString(value: unknown, field: string, maxLength: number) {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== 'string') throw httpError(400, `${field} must be a string`);
-  const trimmed = value.trim();
-  if (trimmed.length > maxLength) throw httpError(400, `${field} is too long`);
-  return trimmed;
-}
+// Admin routes
+router.use('/admin', adminRoutes);
 
-function requiredString(value: unknown, field: string, maxLength: number) {
-  const text = optionalString(value, field, maxLength);
-  if (!text) throw httpError(400, `${field} is required`);
-  return text;
-}
+// Role-specific routes (student, coach, pm, instructor)
+router.use('/', roleRoutes);
 
-function optionalInt(value: unknown, field: string, min: number, max: number, fallback: number) {
-  if (value === undefined || value === null || value === '') return fallback;
-  const numberValue = Number(value);
-  if (!Number.isInteger(numberValue) || numberValue < min || numberValue > max) {
-    throw httpError(400, `${field} must be an integer from ${min} to ${max}`);
-  }
-  return numberValue;
-}
-
-function uniqueStrings(values: unknown, field: string, maxItems = 50) {
-  if (values === undefined || values === null) return [];
-  if (!Array.isArray(values)) throw httpError(400, `${field} must be an array`);
-  const clean = values.map((value) => requiredString(value, field, 128));
-  if (clean.length > maxItems) throw httpError(400, `${field} has too many values`);
-  return [...new Set(clean)];
-}
-
-const REPORT_STATUSES_FROM_STUDENT = new Set(['DRAFT', 'SUBMITTED']);
-const PERFORMANCE_LEVELS = new Set(['EXCEEDING', 'MEETING', 'APPROACHING', 'BEGINNING']);
-
-console.log("[SERVER] Mounting routes...");
-
-/** Invite links stop working after this window (defence against stale/leaked links). */
-const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-function newInvite() {
-  return {
-    inviteToken: crypto.randomBytes(32).toString('hex'),
-    inviteExpires: new Date(Date.now() + INVITE_TTL_MS),
-  };
-}
-
-router.post('/setup-account', async (req: any, res: any) => {
-    try {
-        const token = requiredString(req.body.token, 'token', 256);
-        const password = req.body.password;
-        if (!password || typeof password !== 'string' || password.length < 8) {
-            return res.status(400).json({ error: 'Valid token and password (min 8 chars) required' });
-        }
-
-        const user = await prisma.user.findUnique({ where: { inviteToken: token } });
-        if (!user || user.accountStatus !== 'INVITED') {
-            return res.status(400).json({ error: 'Invalid or expired token' });
-        }
-        if (user.inviteExpires && user.inviteExpires.getTime() < Date.now()) {
-            return res.status(400).json({ error: 'Invalid or expired token' });
-        }
-
-        // Create the Clerk auth identity for this invited user (role from the
-        // invite row, authoritative in publicMetadata), then activate the mirror.
-        const clerkUser = await provisionClerkUser({
-            email: user.email, password: String(password), name: user.name, role: user.role,
-        });
-
-        let updatedUser;
-        try {
-            updatedUser = await prisma.user.update({
-                where: { id: user.id },
-                data: {
-                    // Link the invited mirror row to the Clerk identity just created.
-                    clerkUserId: clerkUser.id,
-                    inviteToken: null,
-                    inviteExpires: null,
-                    accountStatus: 'ACTIVE',
-                }
-            });
-        } catch (dbError) {
-            // Postgres failed after Clerk succeeded: undo the Clerk user we
-            // created so the invite stays usable instead of leaving an orphan.
-            if (clerkUser.created) await deleteClerkUser(clerkUser.id);
-            throw dbError;
-        }
-
-        await prisma.auditLog.create({
-           data: { actorId: updatedUser.id, actorRole: updatedUser.role, action: 'ACTIVATE', entityType: 'User', entityId: updatedUser.id, description: `User setup account via token` }
-        });
-
-        res.json({
-          success: true,
-          user: { id: updatedUser.id, email: updatedUser.email, name: updatedUser.name, role: updatedUser.role }
-        });
-    } catch(e: any) {
-        res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' });
-    }
-});
-router.get('/signup/options', async (req, res) => {
-    try {
-        const { programManagerId, pathwayId } = req.query;
-        
-        const pms = await prisma.user.findMany({ where: { role: 'PROGRAM_MANAGER', accountStatus: 'ACTIVE', isActive: true }, select: { id: true, name: true } });
-        
-        let coaches: { id: string, name: string }[] = [];
-        if (programManagerId) {
-            coaches = await prisma.user.findMany({ where: { role: { in: COACH_LEVEL }, managerId: String(programManagerId), accountStatus: 'ACTIVE', isActive: true }, select: { id: true, name: true } });
-        }
-
-        const pathways = await prisma.pathway.findMany({ where: { isActive: true }, select: { id: true, name: true } });
-
-        let classes: { id: string, name: string, instructorName: string }[] = [];
-        if (pathwayId) {
-            const rawClasses = await prisma.classModel.findMany({ where: { pathwayId: String(pathwayId), isActive: true }, include: { instructor: true } });
-            classes = rawClasses.map(c => ({ id: c.id, name: c.name, instructorName: c.instructor?.name || 'Unassigned' }));
-        }
-
-        res.json({ pms, coaches, pathways, classes });
-    } catch(e) {
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-router.post('/signup', async (req, res) => {
-    try {
-        const { name, email, password, programManagerId, coachId, pathwayId, classIds } = req.body;
-        const normalizedEmail = requiredString(email, 'email', 256).toLowerCase();
-        const cleanName = requiredString(name, 'name', 128);
-        const cleanClassIds = uniqueStrings(classIds, 'classIds', 20);
-
-        if (!password || String(password).length < 8) {
-            return res.status(400).json({ error: 'Valid name, email, and password (min 8 chars) required.' });
-        }
-        if (!programManagerId || !coachId || !pathwayId || cleanClassIds.length === 0) {
-            return res.status(400).json({ error: 'Program manager, coach, pathway, and at least one class are required.' });
-        }
-
-        const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-        if (existing) return res.status(400).json({ error: 'Email already in use' });
-
-        const [pm, coach, pathway, classes] = await Promise.all([
-            prisma.user.findUnique({ where: { id: String(programManagerId) } }),
-            prisma.user.findUnique({ where: { id: String(coachId) } }),
-            prisma.pathway.findUnique({ where: { id: String(pathwayId) } }),
-            prisma.classModel.findMany({ where: { id: { in: cleanClassIds } } })
-        ]);
-
-        if (!pm || pm.role !== 'PROGRAM_MANAGER' || pm.accountStatus !== 'ACTIVE' || !pm.isActive) {
-            return res.status(400).json({ error: 'Invalid PM selected' });
-        }
-        if (!coach || !isCoachLevel(coach.role) || coach.accountStatus !== 'ACTIVE' || !coach.isActive || coach.managerId !== pm.id) {
-            return res.status(400).json({ error: 'Invalid coach selected' });
-        }
-        if (!pathway || !pathway.isActive) {
-            return res.status(400).json({ error: 'Invalid pathway selected' });
-        }
-        if (classes.length !== cleanClassIds.length || classes.some((cls) => !cls.isActive || cls.pathwayId !== pathway.id)) {
-            return res.status(400).json({ error: 'Invalid class selection' });
-        }
-
-        // Create the Clerk auth identity first (role in publicMetadata), then
-        // mirror the student + profile into Postgres using the Clerk user id.
-        const clerkUser = await provisionClerkUser({
-            email: normalizedEmail, password: String(password), name: cleanName, role: 'STUDENT',
-        });
-
-        let student;
-        try {
-            student = await prisma.$transaction(async (tx) => {
-                 const user = await tx.user.create({
-                     data: {
-                         id: clerkUser.id,
-                         clerkUserId: clerkUser.id,
-                         name: cleanName, email: normalizedEmail,
-                         role: 'STUDENT', accountStatus: 'ACTIVE'
-                     }
-                 });
-
-                 const profile = await tx.studentProfile.create({
-                     data: {
-                         userId: user.id,
-                         programManagerId: pm.id,
-                         coachId: coach.id,
-                         pathwayId: pathway.id
-                     }
-                 });
-
-                 await tx.studentClassEnrollment.createMany({
-                    data: cleanClassIds.map(cid => ({ classId: cid, studentProfileId: profile.id }))
-                 });
-
-                 return user;
-            });
-        } catch (dbError) {
-            // Compensate: a Clerk identity with no application record would be
-            // able to sign in with no program, coach or classes attached.
-            if (clerkUser.created) await deleteClerkUser(clerkUser.id);
-            throw dbError;
-        }
+// Conduct routes
+router.use('/conduct', conductRoutes);
 
         res.json({
           success: true,
@@ -392,65 +203,22 @@ router.post('/reports', authMiddleware, roleMiddleware(['STUDENT']), async (req,
             if (classRatingData.length > 0) {
                 await tx.classRating.createMany({ data: classRatingData });
             }
+// Targeted questions routes
+router.use('/targeted-questions', targetedQuestionRoutes);
 
-            return savedReport;
-        });
+// Student engagement domain (check-ins, goals, templates, annotations)
+router.use('/', engagementRoutes);
 
-        if (requestedStatus === 'SUBMITTED') {
-            const settings = await prisma.appSettings.findFirst() || {} as any;
-            const thresholdEnergy = settings.alertThresholdEnergy || 3;
-            const thresholdMood = settings.alertThresholdMood || 3;
-            const thresholdAttend = settings.alertThresholdAttend || 70;
-            const thresholdConf = settings.alertThresholdConf || 3;
+// Scheduled jobs — authenticated by CRON_SECRET, not by a user session.
+router.use('/cron', cronRoutes);
 
-            let alertsTriggered = 0;
-            const createAlertIfNew = async (type: string, severity: string, description: string) => {
-                const existing = await prisma.alert.findFirst({
-                    where: { studentId, description, resolved: false }
-                });
-                if (!existing) {
-                    alertsTriggered++;
-                    await prisma.alert.create({
-                        data: { studentId, type, severity, description }
-                    });
-                }
-            };
-
-            if (reportData.energy < thresholdEnergy) await createAlertIfNew('LOW_ENERGY', 'MEDIUM', 'Student reported low energy');
-            if (reportData.mood < thresholdMood) await createAlertIfNew('LOW_MOOD', 'MEDIUM', 'Student reported low mood');
-            if (reportData.attendance < thresholdAttend) await createAlertIfNew('LOW_ATTENDANCE', 'HIGH', 'Attendance dropped below threshold');
-            if (reportData.confidence < thresholdConf) await createAlertIfNew('LOW_CONFIDENCE', 'MEDIUM', 'Student reported low confidence');
-            if (reportData.needsSupport) await createAlertIfNew('SUPPORT_NEEDED', 'HIGH', 'Student explicitly requested support');
-            
-            const hasBeginning = [...classRatings.values()].some((cr) => cr.rating === 'BEGINNING');
-            if (hasBeginning) await createAlertIfNew('LOW_PERFORMANCE', 'HIGH', 'Student reported BEGINNING in a class');
-            
-            if (challengeTags.length > 2) await createAlertIfNew('CHALLENGE_FLAGGED', 'MEDIUM', 'Multiple challenges flagged');
-
-            if (alertsTriggered >= 3) {
-                await prisma.alert.updateMany({
-                   where: { studentId, resolved: false },
-                   data: { severity: 'CRITICAL' }
-                });
-            }
-
-            await prisma.auditLog.create({
-                data: { actorId: studentId, actorRole: 'STUDENT', action: 'STATUS_CHANGE', entityType: 'WeeklyReport', entityId: report.id, description: 'Submitted weekly report' }
-            });
-        }
-
-        res.json({ id: report.id });
-    } catch(e: any) {
-        res.status(e.status || 500).json({ error: e.message || 'Server error' });
-    }
-});
-// Legacy password/JWT login endpoints (POST /auth/login, POST /auth/logout)
-// were removed: Clerk owns identity, passwords and sessions. The browser signs
-// in with Clerk and sends the session token; the API only verifies it, and
-// signing out is a Clerk client operation (see server/auth.ts, src/hooks/useAuth).
-
-router.get('/auth/session', authMiddleware, async (req: AuthRequest, res) => {
-  const user = await prisma.user.findUnique({ where: { id: (req as any).user.id }, select: { id: true, email: true, name: true, role: true } });
+// Session route
+router.get('/auth/session', authMiddleware, async (req, res) => {
+  const { default: prisma } = await import('./prisma.js');
+  const user = await prisma.user.findUnique({
+    where: { id: (req as any).user.id },
+    select: { id: true, email: true, name: true, role: true }
+  });
   if (!user) return res.status(401).json({ error: 'Invalid' });
   res.json({ user });
 });
@@ -1734,6 +1502,20 @@ router.patch('/conduct/:id', authMiddleware, roleMiddleware(['ADMIN']), async (r
         });
         res.json(entry);
     } catch (e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Unable to review conduct entry' }); }
+// Dashboard redirect
+router.get('/dashboard-redirect', authMiddleware, (req, res) => {
+  const role = (req as any).user.role;
+  switch (role) {
+    case 'DEV': return res.redirect('/admin');
+    case 'ADMIN': return res.redirect('/admin');
+    case 'PROGRAM_MANAGER': return res.redirect('/pm');
+    case 'INSTRUCTOR': return res.redirect('/instructor');
+    case 'COACH': return res.redirect('/coach');
+    case 'PSM': return res.redirect('/coach');
+    case 'STUDENT': return res.redirect('/student');
+    case 'INTERN': return res.redirect('/student');
+    default: return res.redirect('/');
+  }
 });
 
 // Member profiles (LinkedIn-style work experience, education, skills, resume).
