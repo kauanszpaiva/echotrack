@@ -42,11 +42,17 @@ model User {
   instructorPathway   Pathway? @relation("InstructorPathway", fields: [instructorPathwayId], references: [id], onDelete: SetNull)
 
   studentProfile           StudentProfile?
+  memberProfile            MemberProfile?
   classesTaught            ClassModel[]       @relation("InstructorClasses")
   assignedStudents         StudentProfile[]   @relation("CoachStudents")
+  psmStudents              StudentProfile[]   @relation("PsmStudents")
   pmStudents               StudentProfile[]   @relation("PMStudents")
   managedCommunities       Community[]        @relation("PMCommunities")
   weeklyReports            WeeklyReport[]
+  reportsReceived          WeeklyReport[]     @relation("ReportRecipient")
+  timesheets               Timesheet[]        @relation("TimesheetStudent")
+  timesheetsReceived       Timesheet[]        @relation("TimesheetRecipient")
+  timesheetsReviewed       Timesheet[]        @relation("TimesheetReviewer")
   coachFeedbacks           CoachFeedback[]
   targetedQuestionsCreated TargetedQuestion[] @relation("CreatedByStaff")
   targetedAnswers          TargetedAnswer[]
@@ -56,6 +62,10 @@ model User {
   conductEntriesAuthored   ConductEntry[]     @relation("ConductEntryAuthor")
   conductEntriesReviewed   ConductEntry[]     @relation("ConductEntryReviewer")
   conductEntriesReceived   ConductEntry[]     @relation("ConductEntryStudent")
+  performanceContract      PerformanceContract? @relation("StudentContract")
+  epicPlans                EpicPlan[]         @relation("EpicPlanStudent")
+  epicPlansOpened          EpicPlan[]         @relation("EpicPlanOpener")
+  epicPlansClosed          EpicPlan[]         @relation("EpicPlanCloser")
 
   // Student engagement domain
   dailyCheckIns          DailyCheckIn[]       @relation("StudentCheckIns")
@@ -75,6 +85,61 @@ model User {
   sentChatMessages ChatMessage[]       @relation("SentChatMessages")
 
   @@map("users")
+}
+
+/// The binding Performance Contract a student enrols under. Points work like a
+/// professional standing "bank account": the contract opens with a pool (200 on
+/// most tracks, 150 on CX), weeks that meet expectations add to it, and approved
+/// ConductEntry infractions deduct from it. The balance is always derived — see
+/// contractStanding in shared/contract.ts — never stored, so it cannot drift
+/// from the conduct record behind it.
+model PerformanceContract {
+  id        String   @id @default(cuid())
+  studentId String   @unique @map("student_id")
+  /// IT | BUSINESS | CUSTOMER_EXPERIENCE — sets the opening pool and duration.
+  track     String
+  /// Weeks that met expectations, each worth the track's pointsPerWeek.
+  weeksMet  Int      @default(0) @map("weeks_met")
+  /// ACTIVE | EPIC | DISMISSED | COMPLETED
+  status    String   @default("ACTIVE")
+  signedAt  DateTime? @map("signed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  student User @relation("StudentContract", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("performance_contracts")
+}
+
+/// A Performance Improvement (EPIC) plan. Opened when a student's contract
+/// balance reaches the EPIC threshold, or when a PSM flags a workplace
+/// performance issue during Phase 2 — drafted with the Phase 1 Program Manager.
+model EpicPlan {
+  id           String    @id @default(cuid())
+  studentId    String    @map("student_id")
+  openedById   String    @map("opened_by_id")
+  /// OPEN | MET | NOT_MET | CANCELLED
+  status       String    @default("OPEN")
+  /// Why the plan was opened.
+  reason       String
+  /// What the student must do to return to good standing.
+  expectations String
+  /// Point balance when the plan was opened, kept for the record.
+  balanceAtOpen Int?     @map("balance_at_open")
+  reviewDate   DateTime? @map("review_date")
+  closedById   String?   @map("closed_by_id")
+  closedAt     DateTime? @map("closed_at")
+  outcomeNote  String?   @map("outcome_note")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  student  User  @relation("EpicPlanStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  openedBy User  @relation("EpicPlanOpener", fields: [openedById], references: [id], onDelete: Restrict)
+  closedBy User? @relation("EpicPlanCloser", fields: [closedById], references: [id], onDelete: SetNull)
+
+  @@index([studentId, status])
+  @@index([status])
+  @@map("epic_plans")
 }
 
 model ConductEntry {
@@ -100,17 +165,38 @@ model ConductEntry {
   @@map("conduct_entries")
 }
 
+/// One intake cycle. A cohort is split into learning communities — two per
+/// cycle — each led by its own Program Manager. `Community` below is a learning
+/// community, not a cohort; students belong to one of them.
+model Cohort {
+  id          String    @id @default(cuid())
+  name        String
+  startDate   DateTime? @map("start_date")
+  endDate     DateTime? @map("end_date")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  communities Community[]
+
+  @@map("cohorts")
+}
+
+/// A learning community (40–60 students) led by a Program Manager.
 model Community {
   id               String   @id @default(cuid())
   name             String
   description      String?
   programManagerId String?  @map("program_manager_id")
+  /// Null for learning communities created before cohorts were tracked.
+  cohortId         String?  @map("cohort_id")
   isActive         Boolean  @default(true) @map("is_active")
   createdAt        DateTime @default(now()) @map("created_at")
 
   programManager  User?            @relation("PMCommunities", fields: [programManagerId], references: [id], onDelete: SetNull)
+  cohort          Cohort?          @relation(fields: [cohortId], references: [id], onDelete: SetNull)
   studentProfiles StudentProfile[]
 
+  @@index([cohortId])
   @@map("communities")
 }
 
@@ -152,6 +238,9 @@ model StudentProfile {
   id               String   @id @default(cuid())
   userId           String   @unique @map("user_id")
   coachId          String?  @map("coach_id")
+  /// Placement Success Manager. Phase 2 weekly reports and timesheets route
+  /// here instead of to the coach; the coach keeps contact either way.
+  psmId            String?  @map("psm_id")
   programManagerId String?  @map("program_manager_id")
   communityId      String?  @map("community_id")
   pathwayId        String?  @map("pathway_id")
@@ -162,12 +251,116 @@ model StudentProfile {
 
   user             User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   coach            User?                    @relation("CoachStudents", fields: [coachId], references: [id], onDelete: SetNull)
+  psm              User?                    @relation("PsmStudents", fields: [psmId], references: [id], onDelete: SetNull)
   programManager   User?                    @relation("PMStudents", fields: [programManagerId], references: [id], onDelete: SetNull)
   community        Community?               @relation(fields: [communityId], references: [id], onDelete: SetNull)
   pathway          Pathway?                 @relation(fields: [pathwayId], references: [id], onDelete: SetNull)
   classEnrollments StudentClassEnrollment[]
 
   @@map("student_profiles")
+}
+
+/// A LinkedIn-style professional profile owned by one member.
+///
+/// Membership scope: a member's cohort is their `StudentProfile.communityId`.
+/// The profile itself is keyed on the user (so staff can have one too), and the
+/// member directory is filtered by community so people browse their own cohort.
+/// Community is never copied onto this row — it is always read through
+/// StudentProfile so moving a student between cohorts needs no backfill.
+model MemberProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  headline    String?
+  about       String?
+  location    String?
+  linkedinUrl String?  @map("linkedin_url")
+  websiteUrl  String?  @map("website_url")
+  /// Owner-controlled. Unpublished profiles are visible only to the owner and admins.
+  isPublished Boolean  @default(false) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workExperiences WorkExperience[]
+  education       EducationEntry[]
+  certifications  Certification[]
+  skills          ProfileSkill[]
+
+  @@map("member_profiles")
+}
+
+model WorkExperience {
+  id             String    @id @default(cuid())
+  profileId      String    @map("profile_id")
+  title          String
+  company        String
+  /// FULL_TIME | PART_TIME | INTERNSHIP | APPRENTICESHIP | CONTRACT | VOLUNTEER | SELF_EMPLOYED
+  employmentType String?   @map("employment_type")
+  location       String?
+  /// ON_SITE | HYBRID | REMOTE
+  locationType   String?   @map("location_type")
+  startDate      DateTime  @map("start_date")
+  /// Null while `isCurrent` is true.
+  endDate        DateTime? @map("end_date")
+  isCurrent      Boolean   @default(false) @map("is_current")
+  description    String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, startDate])
+  @@map("work_experiences")
+}
+
+model EducationEntry {
+  id           String    @id @default(cuid())
+  profileId    String    @map("profile_id")
+  school       String
+  degree       String?
+  fieldOfStudy String?   @map("field_of_study")
+  startDate    DateTime? @map("start_date")
+  endDate      DateTime? @map("end_date")
+  isCurrent    Boolean   @default(false) @map("is_current")
+  description  String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, startDate])
+  @@map("education_entries")
+}
+
+model Certification {
+  id            String    @id @default(cuid())
+  profileId     String    @map("profile_id")
+  name          String
+  issuer        String?
+  issueDate     DateTime? @map("issue_date")
+  expiryDate    DateTime? @map("expiry_date")
+  credentialId  String?   @map("credential_id")
+  credentialUrl String?   @map("credential_url")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, issueDate])
+  @@map("certifications")
+}
+
+model ProfileSkill {
+  id        String   @id @default(cuid())
+  profileId String   @map("profile_id")
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile MemberProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, name])
+  @@map("profile_skills")
 }
 
 model StudentClassEnrollment {
@@ -195,6 +388,7 @@ model ReportCycle {
 
   pathway           Pathway?           @relation(fields: [pathwayId], references: [id], onDelete: SetNull)
   weeklyReports     WeeklyReport[]
+  timesheets        Timesheet[]
   targetedQuestions TargetedQuestion[]
   weeklyGoals       WeeklyGoal[]
 
@@ -207,6 +401,12 @@ model WeeklyReport {
   cycleId     String    @map("cycle_id")
   status      String    @default("DRAFT")
   submittedAt DateTime? @map("submitted_at")
+
+  /// PHASE_1 | PHASE_2, stamped at submission so the routing stays auditable
+  /// even after the student moves into the next phase.
+  phase       String?   @map("phase")
+  /// Who the report was sent to: the coach in Phase 1, the PSM in Phase 2.
+  recipientId String?   @map("recipient_id")
 
   energy     Int? @default(5)
   mood       Int? @default(5)
@@ -231,6 +431,7 @@ model WeeklyReport {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student         User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  recipient       User?            @relation("ReportRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
   cycle           ReportCycle      @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   classRatings    ClassRating[]
   coachFeedback   CoachFeedback[]
@@ -242,6 +443,51 @@ model WeeklyReport {
   @@index([studentId])
   @@index([cycleId])
   @@map("weekly_reports")
+}
+
+/// Phase 2 (internship) only. Students log their internship hours each cycle and
+/// submit them to their PSM alongside the weekly status report.
+model Timesheet {
+  id          String    @id @default(cuid())
+  studentId   String    @map("student_id")
+  cycleId     String    @map("cycle_id")
+  status      String    @default("DRAFT")
+  /// Denormalised sum of the entries, recomputed server-side on every save.
+  totalHours  Float     @default(0) @map("total_hours")
+  notes       String?
+  submittedAt DateTime? @map("submitted_at")
+
+  /// The PSM the timesheet was submitted to.
+  recipientId String?   @map("recipient_id")
+  reviewedById String?  @map("reviewed_by_id")
+  reviewedAt  DateTime? @map("reviewed_at")
+  reviewNote  String?   @map("review_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  student    User            @relation("TimesheetStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  recipient  User?           @relation("TimesheetRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
+  reviewedBy User?           @relation("TimesheetReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  cycle      ReportCycle     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  entries    TimesheetEntry[]
+
+  @@unique([studentId, cycleId])
+  @@index([recipientId, status])
+  @@map("timesheets")
+}
+
+model TimesheetEntry {
+  id          String   @id @default(cuid())
+  timesheetId String   @map("timesheet_id")
+  workDate    DateTime @map("work_date")
+  hours       Float
+  description String?
+
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+
+  @@index([timesheetId, workDate])
+  @@map("timesheet_entries")
 }
 
 model ClassRating {
@@ -366,6 +612,10 @@ model AppSettings {
   alertThresholdMood   Int      @default(3) @map("alert_threshold_mood")
   alertThresholdAttend Int      @default(70) @map("alert_threshold_attend")
   alertThresholdConf   Int      @default(3) @map("alert_threshold_conf")
+  /// Contract point balance at or above which a student keeps their stipend.
+  stipendPointThreshold Int     @default(150) @map("stipend_point_threshold")
+  /// Balance at or below which an EPIC (Performance Improvement) plan is flagged.
+  epicPointThreshold   Int      @default(120) @map("epic_point_threshold")
   outlookEnabled       Boolean  @default(false) @map("outlook_enabled")
   brightspaceEnabled   Boolean  @default(false) @map("brightspace_enabled")
   updatedAt            DateTime @updatedAt @map("updated_at")

@@ -1,5 +1,11 @@
 // Router principal - agrega todos os sub-routers
 import { Router } from 'express';
+import crypto from 'crypto';
+import { authMiddleware, AuthRequest, roleMiddleware } from './auth.js';
+import prisma from './prisma.js';
+import { isAdminLevel, isCoachLevel, isStudentLevel, STUDENT_LEVEL, COACH_LEVEL } from '../shared/roles.js';
+import { provisionClerkUser, deleteClerkUser } from './clerkAdmin.js';
+import { loadRoutingProfile, routingFor, servesStudent } from './phaseRouting.js';
 import { authMiddleware } from './auth.js';
 
 // Sub-routers
@@ -29,6 +35,174 @@ router.use('/', roleRoutes);
 // Conduct routes
 router.use('/conduct', conductRoutes);
 
+        res.json({
+          success: true,
+          user: { id: student.id, email: student.email, name: student.name, role: student.role }
+        });
+    } catch(e: any) {
+        res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error during signup' });
+    }
+});
+
+router.post('/reports', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) => {
+    try {
+        const payload = req.body;
+        const studentId = (req as any).user?.id;
+        
+        const profile = await prisma.studentProfile.findUnique({
+            where: { userId: studentId },
+            include: { classEnrollments: { where: { isActive: true } } }
+        });
+        if (!profile) return res.status(400).json({ error: 'Student profile not found' });
+
+        const cycle = await prisma.reportCycle.findFirst({
+            where: {
+                status: 'OPEN',
+                OR: [ { pathwayId: profile.pathwayId }, { pathwayId: null } ],
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        
+        if (!cycle) {
+            return res.status(400).json({ error: 'No open report cycle is available.' });
+        }
+
+        const requestedStatus = requiredString(payload.status, 'status', 16);
+        if (!REPORT_STATUSES_FROM_STUDENT.has(requestedStatus)) {
+            return res.status(400).json({ error: 'Students can only save DRAFT or SUBMITTED reports.' });
+        }
+
+        const existingReport = await prisma.weeklyReport.findUnique({
+            where: { studentId_cycleId: { studentId, cycleId: cycle.id } }
+        });
+        if (existingReport && existingReport.status !== 'DRAFT') {
+            return res.status(409).json({ error: 'Submitted or reviewed reports can no longer be edited.' });
+        }
+
+        let challengeTags: string[] = [];
+        if (typeof payload.challengesTags === 'string') {
+            try {
+                challengeTags = JSON.parse(payload.challengesTags);
+            } catch {
+                return res.status(400).json({ error: 'challengesTags must be valid JSON' });
+            }
+        } else if (payload.challengesTags !== undefined) {
+            challengeTags = payload.challengesTags;
+        }
+        challengeTags = uniqueStrings(challengeTags, 'challengesTags', 10).map((tag) => {
+            if (tag.length > 64) throw httpError(400, 'challenge tag is too long');
+            return tag;
+        });
+
+        const ratingPayloads = payload.classRatings === undefined ? [] : payload.classRatings;
+        if (!Array.isArray(ratingPayloads)) throw httpError(400, 'classRatings must be an array');
+
+        const enrolledClassIds = new Set(profile.classEnrollments.map((enrollment) => enrollment.classId));
+        const classRatings = new Map<string, { classId: string; rating: string; comment: string | null }>();
+        for (const rating of ratingPayloads) {
+            if (!rating || typeof rating !== 'object') throw httpError(400, 'Invalid class rating');
+            const classId = requiredString((rating as any).classId, 'classId', 128);
+            const value = requiredString((rating as any).rating, 'rating', 32);
+            if (!enrolledClassIds.has(classId)) throw httpError(403, 'Cannot rate a class you are not enrolled in');
+            if (!PERFORMANCE_LEVELS.has(value)) throw httpError(400, 'Invalid class rating value');
+            classRatings.set(classId, {
+                classId,
+                rating: value,
+                comment: optionalString((rating as any).comment, 'class rating comment', 1000)
+            });
+        }
+
+        const answerPayloads = payload.targetedAnswers === undefined ? [] : payload.targetedAnswers;
+        if (!Array.isArray(answerPayloads)) throw httpError(400, 'targetedAnswers must be an array');
+
+        const targetedAnswers = answerPayloads.map((answer: any) => ({
+            questionId: requiredString(answer?.questionId, 'questionId', 128),
+            answer: requiredString(answer?.answer, 'targeted answer', 4000)
+        }));
+        const targetedQuestionIds = [...new Set(targetedAnswers.map((answer) => answer.questionId))];
+        if (targetedQuestionIds.length > 0) {
+            const validQuestions = await prisma.targetedQuestion.findMany({
+                where: {
+                    id: { in: targetedQuestionIds },
+                    studentId,
+                    isActive: true,
+                    OR: [{ cycleId: cycle.id }, { cycleId: null }]
+                },
+                select: { id: true }
+            });
+            if (validQuestions.length !== targetedQuestionIds.length) {
+                return res.status(403).json({ error: 'One or more targeted questions are not assigned to you.' });
+            }
+        }
+
+        // Phase 1 reports go to the coach, Phase 2 reports to the PSM. Stamp both
+        // on the row so the routing stays auditable once the student moves on.
+        const routingProfile = await loadRoutingProfile(studentId);
+        const routing = routingFor(routingProfile);
+
+        const reportData = {
+            status: requestedStatus,
+            submittedAt: requestedStatus === 'SUBMITTED' ? new Date() : null,
+            phase: routing.phase,
+            recipientId: routing.recipientId,
+            energy: optionalInt(payload.energy, 'energy', 1, 10, 5),
+            mood: optionalInt(payload.mood, 'mood', 1, 10, 5),
+            attendance: optionalInt(payload.attendance, 'attendance', 0, 100, 100),
+            confidence: optionalInt(payload.confidence, 'confidence', 1, 10, 5),
+            weeklyTopic: optionalString(payload.weeklyTopic, 'weeklyTopic', 256),
+            highlights: optionalString(payload.highlights, 'highlights', 5000),
+            academicProgress: optionalString(payload.academicProgress, 'academicProgress', 5000),
+            classExperience: optionalString(payload.classExperience, 'classExperience', 5000),
+            instructorSupport: optionalString(payload.instructorSupport, 'instructorSupport', 2000),
+            events: optionalString(payload.events, 'events', 2000),
+            upcomingEvents: optionalString(payload.upcomingEvents, 'upcomingEvents', 2000),
+            challengesTags: JSON.stringify(challengeTags),
+            challengesText: optionalString(payload.challengesText, 'challengesText', 5000),
+            needsSupport: !!payload.needsSupport,
+            supportNeeded: optionalString(payload.supportNeeded, 'supportNeeded', 2000),
+            reflection: optionalString(payload.reflection, 'reflection', 5000),
+            goals: optionalString(payload.goals, 'goals', 2000)
+        };
+
+        const report = await prisma.$transaction(async (tx) => {
+            const savedReport = await tx.weeklyReport.upsert({
+                where: {
+                    studentId_cycleId: { studentId, cycleId: cycle.id }
+                },
+                update: reportData,
+                create: {
+                    studentId,
+                    cycleId: cycle.id,
+                    ...reportData
+                }
+            });
+
+            for (const ans of targetedAnswers) {
+                await tx.targetedAnswer.upsert({
+                        where: {
+                            questionId_reportId: {
+                                questionId: ans.questionId,
+                                reportId: savedReport.id
+                            }
+                        },
+                        update: { answer: ans.answer, studentId },
+                        create: {
+                            questionId: ans.questionId,
+                            reportId: savedReport.id,
+                            studentId,
+                            answer: ans.answer
+                        }
+                });
+            }
+
+            await tx.classRating.deleteMany({ where: { reportId: savedReport.id } });
+            const classRatingData = [...classRatings.values()].map((rating) => ({
+                reportId: savedReport.id,
+                ...rating
+            }));
+            if (classRatingData.length > 0) {
+                await tx.classRating.createMany({ data: classRatingData });
+            }
 // Targeted questions routes
 router.use('/targeted-questions', targetedQuestionRoutes);
 
@@ -49,6 +223,1285 @@ router.get('/auth/session', authMiddleware, async (req, res) => {
   res.json({ user });
 });
 
+router.get('/dashboard-redirect', authMiddleware, (req: AuthRequest, res) => {
+    switch ((req as any).user.role) {
+        case 'DEV': return res.redirect('/admin');
+        case 'ADMIN': return res.redirect('/admin');
+        case 'PROGRAM_MANAGER': return res.redirect('/pm');
+        case 'INSTRUCTOR': return res.redirect('/instructor');
+        case 'COACH': return res.redirect('/coach');
+        case 'PSM': return res.redirect('/coach');
+        case 'STUDENT': return res.redirect('/student');
+        case 'INTERN': return res.redirect('/student');
+        // Placement and site staff have no dashboard of their own yet; their
+        // profile is the one page they can always reach.
+        default: return res.redirect('/profile');
+    }
+});
+
+// --- ADMIN ---
+router.get('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
+    try {
+        const pms = await prisma.user.findMany({
+            where: { role: 'PROGRAM_MANAGER' },
+            select: { id: true, name: true, email: true, accountStatus: true, inviteToken: true, inviteExpires: true },
+            orderBy: { createdAt: 'desc' }
+        });
+        // The setup link is only meaningful for a pending, unexpired invite —
+        // don't hand out live tokens for anything else.
+        res.json(pms.map(({ inviteToken, inviteExpires, ...pm }) => ({
+            ...pm,
+            inviteExpires,
+            inviteToken:
+                pm.accountStatus === 'INVITED' && (!inviteExpires || inviteExpires.getTime() > Date.now())
+                    ? inviteToken
+                    : null,
+        })));
+    } catch (e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+import { generateDocx, generatePdf } from './exports.js';
+
+router.get('/reports/export-docx', authMiddleware, async (req: any, res: any) => {
+    try {
+        const { id } = req.query;
+        const report = await prisma.weeklyReport.findUnique({
+            where: { id: String(id) },
+            include: { student: { include: { studentProfile: { include: { classEnrollments: { include: { classModel: true } } } } } }, cycle: true, classRatings: true }
+        });
+        if (!report) return res.status(404).json({ error: 'Not found' });
+
+        const reqUser = req.user;
+        let authorized = false;
+        if (isAdminLevel(reqUser.role)) authorized = true;
+        else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
+        else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
+        else if (reqUser.role === 'INSTRUCTOR') {
+             const enrollments = report.student.studentProfile?.classEnrollments || [];
+             authorized = enrollments.some(ce => ce.classModel?.instructorId === reqUser.id);
+        }
+
+        if (!authorized) return res.status(403).json({ error: 'Unauthorized' });
+
+        const buffer = await generateDocx(omitSensitive(report));
+        const filename = `EchoTrack_Report_${report.student.name.replace(/ /g, '_')}.docx`;
+        
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'EXPORT', entityType: 'WeeklyReport', entityId: report.id, description: 'Exported DOCX' }
+        });
+
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.send(buffer);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/reports/export-pdf', authMiddleware, async (req: any, res: any) => {
+    try {
+        const { id } = req.query;
+        const report = await prisma.weeklyReport.findUnique({
+            where: { id: String(id) },
+            include: { student: { include: { studentProfile: { include: { classEnrollments: { include: { classModel: true } } } } } }, cycle: true, classRatings: true }
+        });
+        if (!report) return res.status(404).json({ error: 'Not found' });
+
+        const reqUser = req.user;
+        let authorized = false;
+        if (isAdminLevel(reqUser.role)) authorized = true;
+        else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
+        else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
+        else if (reqUser.role === 'INSTRUCTOR') {
+             const enrollments = report.student.studentProfile?.classEnrollments || [];
+             authorized = enrollments.some(ce => ce.classModel?.instructorId === reqUser.id);
+        }
+
+        if (!authorized) return res.status(403).json({ error: 'Unauthorized' });
+
+        const stream = await generatePdf(omitSensitive(report));
+        const filename = `EchoTrack_Report_${report.student.name.replace(/ /g, '_')}.pdf`;
+        
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'EXPORT', entityType: 'WeeklyReport', entityId: report.id, description: 'Exported PDF' }
+        });
+
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/pdf');
+        stream.pipe(res);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/admin/register-staff', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res) => {
+    try {
+        const { name, email, password, role } = req.body;
+        const normalizedEmail = requiredString(email, 'email', 256).toLowerCase();
+        const cleanName = requiredString(name, 'name', 128);
+        
+        let newRole = role || 'PROGRAM_MANAGER';
+        if (isAdminLevel(req.user.role)) {
+            // Placement and site roles carry no permissions of their own — see
+            // the note in shared/roles.ts before granting them any.
+            const adminCreatable = [
+                'PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'INTERN',
+                'CORPORATE_ENGAGEMENT_MANAGER', 'INTERNSHIP_SERVICES_SPECIALIST',
+                'SITE_OPERATIONS', 'STUDENT_SERVICES', 'DEVELOPMENT_FINANCE',
+            ];
+            if (!adminCreatable.includes(newRole)) {
+                return res.status(400).json({ error: 'Invalid staff role' });
+            }
+        } else {
+            if (!['COACH', 'PSM', 'INSTRUCTOR'].includes(newRole)) {
+                return res.status(400).json({ error: 'Program Managers can only create coaches, PSMs or instructors' });
+            }
+        }
+
+        const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (existing) return res.status(400).json({ error: 'User already exists' });
+
+        if (!password || typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+        // Create the auth identity in Clerk (role authoritative in publicMetadata),
+        // then mirror it into Postgres using the Clerk user id.
+        const clerkUser = await provisionClerkUser({
+            email: normalizedEmail, password, name: cleanName, role: newRole,
+        });
+
+        let user;
+        try {
+            user = await prisma.user.create({
+                data: {
+                    id: clerkUser.id,
+                    clerkUserId: clerkUser.id,
+                    name: cleanName,
+                    email: normalizedEmail,
+                    role: newRole,
+                    accountStatus: 'ACTIVE',
+                    isActive: true,
+                    managerId: req.user.role === 'PROGRAM_MANAGER' ? req.user.id : undefined
+                }
+            });
+        } catch (dbError) {
+            if (clerkUser.created) await deleteClerkUser(clerkUser.id);
+            throw dbError;
+        }
+        
+        await prisma.auditLog.create({
+           data: { actorId: req.user?.id, actorRole: req.user?.role, action: 'CREATE', entityType: 'USER', entityId: user.id, description: `${isAdminLevel(req.user?.role) ? 'Admin' : 'Program Manager'} registered ${newRole} ${cleanName}` }
+        });
+
+        res.json({
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                accountStatus: user.accountStatus
+            }
+        });
+    } catch(e: any) {
+        // Never echo the upstream (Clerk/Prisma) message back to the client.
+        console.error('REGISTER ERROR:', e);
+        res.status(e.status || 500).json({ error: e.status ? e.message : 'Unable to create the user' });
+    }
+});
+
+router.post('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
+    try {
+        const name = requiredString(req.body.name, 'name', 128);
+        const normalizedEmail = requiredString(req.body.email, 'email', 256).toLowerCase();
+        
+        const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (existing) return res.status(400).json({ error: 'User already exists' });
+        
+        const invite = newInvite();
+
+        const user = await prisma.user.create({
+            data: {
+                name,
+                email: normalizedEmail,
+                role: 'PROGRAM_MANAGER',
+                accountStatus: 'INVITED',
+                isActive: true,
+                ...invite
+            }
+        });
+        
+        await prisma.auditLog.create({
+           data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'USER', entityId: user.id, description: `Admin invited Program Manager ${name}` }
+        });
+
+        res.json({
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                accountStatus: user.accountStatus
+            },
+            setupLink: `/setup-account?token=${invite.inviteToken}`,
+            setupLinkExpiresAt: invite.inviteExpires.toISOString()
+        });
+    } catch(e: any) {
+        res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' });
+    }
+});
+
+router.delete('/admin/invite', authMiddleware, roleMiddleware(['ADMIN']), async (req, res) => {
+    try {
+        const { id } = req.query;
+        await prisma.user.update({
+            where: { id: String(id) },
+            data: { accountStatus: 'DEACTIVATED', isActive: false }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/analytics', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any, next: any) => {
+    try {
+        if (req.user.role === 'PROGRAM_MANAGER') {
+            const pmId = req.user.id;
+            const totalStudents = await prisma.user.count({ where: { role: { in: STUDENT_LEVEL }, isActive: true, studentProfile: { programManagerId: pmId } } });
+            const totalStaff = await prisma.user.count({ where: { isActive: true, managerId: pmId } });
+            const cycle = await prisma.reportCycle.findFirst({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' } });
+            const cycleFilter = cycle ? { cycleId: cycle.id, student: { studentProfile: { programManagerId: pmId } } } : undefined;
+            const submittedReportsThisCycle = cycleFilter ? await prisma.weeklyReport.count({ where: { ...cycleFilter, status: 'SUBMITTED' } }) : 0;
+            const reviewedReportsThisCycle = cycleFilter ? await prisma.weeklyReport.count({ where: { ...cycleFilter, status: 'REVIEWED' } }) : 0;
+            const activeAlerts = await prisma.alert.count({ where: { resolved: false, student: { studentProfile: { programManagerId: pmId } } } });
+            const needsSupportReports = await prisma.weeklyReport.findMany({
+                where: { needsSupport: true, student: { studentProfile: { programManagerId: pmId } } },
+                select: { studentId: true }
+            });
+
+            return res.json({
+                totalStudents,
+                totalActiveUsers: totalStudents + totalStaff + 1,
+                totalProgramManagers: 1,
+                totalPathways: await prisma.pathway.count({ where: { isActive: true, studentProfiles: { some: { programManagerId: pmId } } } }),
+                totalClasses: 0,
+                submittedReportsThisCycle,
+                submissionRate: totalStudents > 0 ? Math.round(((submittedReportsThisCycle + reviewedReportsThisCycle) / totalStudents) * 100) : 0,
+                reviewedRate: submittedReportsThisCycle > 0 ? Math.round((reviewedReportsThisCycle / submittedReportsThisCycle) * 100) : 0,
+                overdueReports: 0,
+                studentsNeedingSupport: new Set(needsSupportReports.map((report) => report.studentId)).size,
+                activeAlerts,
+                alertDistribution: [],
+                classPerformance: { overall: {}, byPathway: [] },
+                submissionTrend: [],
+                recentActivity: []
+            });
+        }
+
+        // These queries are independent of each other, so they run concurrently.
+        // Serially this was ~15 round-trips to Supabase on every dashboard load,
+        // which on a cold serverless container can run past the function's time
+        // limit — and a timed-out function returns Vercel's HTML error page, not
+        // JSON, which is what surfaced as "Server returned non-JSON response".
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const [
+            totalStudents,
+            totalActiveUsers,
+            cycle,
+            openCyclesPastDue,
+            needsSupportReports,
+            activeAlertsCount,
+            typeGroups,
+            recentActivity,
+            trend,
+            allRatings,
+            totalProgramManagers,
+            totalPathways,
+            totalClasses,
+        ] = await Promise.all([
+            prisma.user.count({ where: { role: { in: STUDENT_LEVEL }, isActive: true } }),
+            prisma.user.count({ where: { isActive: true } }),
+            prisma.reportCycle.findFirst({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' } }),
+            prisma.reportCycle.count({ where: { status: 'OPEN', endDate: { lt: new Date() } } }),
+            prisma.weeklyReport.findMany({ where: { needsSupport: true }, select: { studentId: true } }),
+            prisma.alert.count({ where: { resolved: false } }),
+            prisma.alert.groupBy({ by: ['type'], _count: { id: true } }),
+            prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }),
+            prisma.weeklyReport.groupBy({
+                by: ['createdAt'],
+                _count: { id: true },
+                where: { createdAt: { gte: sevenDaysAgo } },
+                orderBy: { createdAt: 'asc' }
+            }),
+            prisma.classRating.findMany({ select: { rating: true } }),
+            prisma.user.count({ where: { role: 'PROGRAM_MANAGER', isActive: true } }),
+            prisma.pathway.count({ where: { isActive: true } }),
+            prisma.classModel.count({ where: { isActive: true } }),
+        ]);
+
+        let submissionRate = 0;
+        let reviewedRate = 0;
+        let submittedCount = 0;
+
+        if (cycle) {
+            const [submitted, reviewed] = await Promise.all([
+                prisma.weeklyReport.count({ where: { cycleId: cycle.id, status: 'SUBMITTED' } }),
+                prisma.weeklyReport.count({ where: { cycleId: cycle.id, status: 'REVIEWED' } }),
+            ]);
+            submittedCount = submitted;
+            if (totalStudents > 0) submissionRate = Math.round((submitted / totalStudents) * 100);
+            if (submitted > 0) reviewedRate = Math.round((reviewed / submitted) * 100);
+        }
+
+        const overdueReports = openCyclesPastDue * totalStudents;
+        const studentsNeedingSupport = new Set(needsSupportReports.map(r => r.studentId)).size;
+        const alertDistribution = typeGroups.map(g => ({ type: g.type, count: g._count.id }));
+        const submissionTrend = trend.map(t => ({ date: t.createdAt.toISOString().split('T')[0], count: t._count.id }));
+
+        // Class performance aggregation
+        const performance = {
+            EXCEEDING: allRatings.filter(r => r.rating === 'EXCEEDING').length,
+            MEETING: allRatings.filter(r => r.rating === 'MEETING').length,
+            APPROACHING: allRatings.filter(r => r.rating === 'APPROACHING').length,
+            BEGINNING: allRatings.filter(r => r.rating === 'BEGINNING').length,
+        };
+
+        res.json({
+            totalStudents,
+            totalActiveUsers,
+            totalProgramManagers,
+            totalPathways,
+            totalClasses,
+            submittedReportsThisCycle: submittedCount,
+            submissionRate,
+            reviewedRate,
+            overdueReports,
+            studentsNeedingSupport,
+            activeAlerts: activeAlertsCount,
+            alertDistribution,
+            classPerformance: { overall: performance, byPathway: [] },
+            submissionTrend,
+            recentActivity
+        });
+    } catch(e) {
+        // Previously swallowed silently, so a failure left no trace in the Vercel
+        // logs at all. Hand it to the central error handler, which logs method +
+        // path + the real error and returns JSON.
+        return next(e);
+    }
+});
+
+router.get('/admin/pathways', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const pathways = await prisma.pathway.findMany({
+            where: { isActive: true },
+            include: {
+                _count: {
+                    select: { classes: true, studentProfiles: true }
+                }
+            }
+        });
+        const mapped = pathways.map(p => ({
+            ...p,
+            classesCount: p._count.classes,
+            studentsCount: p._count.studentProfiles,
+            instructorsCount: 0 // Simplification since instructor works slightly differently
+        }));
+        res.json(mapped);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/admin/pathways', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { name, description } = req.body;
+        const pathway = await prisma.pathway.create({
+            data: { name, description }
+        });
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'Pathway', entityId: pathway.id, description: `Created pathway ${name}` }
+        });
+        res.json(pathway);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.delete('/admin/pathways', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { id } = req.query;
+        await prisma.pathway.update({
+            where: { id: String(id) },
+            data: { isActive: false }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/users', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const where = req.user.role === 'PROGRAM_MANAGER'
+            ? {
+                OR: [
+                    { managerId: req.user.id },
+                    { studentProfile: { programManagerId: req.user.id } }
+                ]
+            }
+            : {};
+        const users = await prisma.user.findMany({
+            where,
+            select: { id: true, name: true, email: true, role: true, accountStatus: true },
+            orderBy: { name: 'asc' }
+        });
+        res.json(users);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/admin/users', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any) => {
+    // Just map to PM invite for now or handle appropriately
+    return res.status(400).json({ error: 'Use PM Invite instead' });
+});
+
+router.patch('/admin/users/:id', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const { id } = req.params;
+        const { isActive } = req.body;
+        
+        const targetUser = await prisma.user.findUnique({ where: { id: String(id) }, include: { studentProfile: true } });
+        if (!targetUser) return res.status(404).json({ error: 'User not found' });
+        
+        if (req.user.role === 'PROGRAM_MANAGER') {
+            const managesStaff = targetUser.managerId === req.user.id;
+            const managesStudent = targetUser.studentProfile?.programManagerId === req.user.id;
+            if (!managesStaff && !managesStudent) {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
+        }
+
+        if (req.user.role === 'PROGRAM_MANAGER' && (isAdminLevel(targetUser.role) || targetUser.role === 'PROGRAM_MANAGER')) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+
+        await prisma.user.update({
+            where: { id: String(id) },
+            data: { isActive, accountStatus: isActive ? 'ACTIVE' : 'DEACTIVATED' }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/settings', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        let settings = await prisma.appSettings.findUnique({ where: { id: 'singleton' } });
+        if (!settings) {
+            settings = await prisma.appSettings.create({ data: { id: 'singleton' } });
+        }
+        res.json(settings);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.patch('/admin/settings', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const data = req.body;
+        const updated = await prisma.appSettings.upsert({
+            where: { id: 'singleton' },
+            create: {
+               id: 'singleton',
+               organizationName: data.organizationName,
+               productName: data.productName,
+               primaryColor: data.primaryColor,
+               weeklyDueDay: data.weeklyDueDay !== undefined ? parseInt(data.weeklyDueDay) : undefined,
+               weeklyDueHour: data.weeklyDueHour !== undefined ? parseInt(data.weeklyDueHour) : undefined,
+               autoCloseCycles: data.autoCloseCycles,
+               alertThresholdEnergy: data.alertThresholdEnergy !== undefined ? parseInt(data.alertThresholdEnergy) : undefined,
+               alertThresholdMood: data.alertThresholdMood !== undefined ? parseInt(data.alertThresholdMood) : undefined,
+               alertThresholdAttend: data.alertThresholdAttend !== undefined ? parseInt(data.alertThresholdAttend) : undefined,
+               alertThresholdConf: data.alertThresholdConf !== undefined ? parseInt(data.alertThresholdConf) : undefined,
+               outlookEnabled: data.outlookEnabled,
+               brightspaceEnabled: data.brightspaceEnabled
+            },
+            update: {
+               organizationName: data.organizationName,
+               productName: data.productName,
+               primaryColor: data.primaryColor,
+               weeklyDueDay: data.weeklyDueDay !== undefined ? parseInt(data.weeklyDueDay) : undefined,
+               weeklyDueHour: data.weeklyDueHour !== undefined ? parseInt(data.weeklyDueHour) : undefined,
+               autoCloseCycles: data.autoCloseCycles,
+               alertThresholdEnergy: data.alertThresholdEnergy !== undefined ? parseInt(data.alertThresholdEnergy) : undefined,
+               alertThresholdMood: data.alertThresholdMood !== undefined ? parseInt(data.alertThresholdMood) : undefined,
+               alertThresholdAttend: data.alertThresholdAttend !== undefined ? parseInt(data.alertThresholdAttend) : undefined,
+               alertThresholdConf: data.alertThresholdConf !== undefined ? parseInt(data.alertThresholdConf) : undefined,
+               outlookEnabled: data.outlookEnabled,
+               brightspaceEnabled: data.brightspaceEnabled
+            }
+        });
+        
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'UPDATE', entityType: 'Settings', entityId: 'singleton', description: 'Updated app settings' }
+        });
+        res.json(updated);
+    } catch(e) {
+        console.error(e);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/classes', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const classes = await prisma.classModel.findMany({
+            where: { isActive: true },
+            include: { pathway: true, instructor: true }
+        });
+        res.json(omitSensitive(classes));
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/admin/classes', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { name, pathwayId, instructorId, schedule } = req.body;
+        const cls = await prisma.classModel.create({
+            data: { name, pathwayId, instructorId, schedule }
+        });
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'Class', entityId: cls.id, description: `Created class ${name}` }
+        });
+        res.json(cls);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.delete('/admin/classes', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { id } = req.query;
+        await prisma.classModel.update({
+            where: { id: String(id) },
+            data: { isActive: false }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/instructors', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const instructors = await prisma.user.findMany({
+            where: { role: 'INSTRUCTOR', isActive: true },
+            select: { id: true, name: true }
+        });
+        res.json(instructors);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/communities', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const communities = await prisma.community.findMany({
+            where: { isActive: true },
+            include: { programManager: true, _count: { select: { studentProfiles: true } } }
+        });
+        res.json(omitSensitive(communities.map(c => ({...c, studentsCount: c._count.studentProfiles}))));
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/admin/communities', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { name, description, programManagerId } = req.body;
+        const comm = await prisma.community.create({
+            data: { name, description, programManagerId }
+        });
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'Community', entityId: comm.id, description: `Created community: ${comm.name}` }
+        });
+        res.json(comm);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.delete('/admin/communities', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { id } = req.query;
+        await prisma.community.update({
+            where: { id: String(id) },
+            data: { isActive: false }
+        });
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'DELETE', entityType: 'Community', entityId: String(id), description: `Deactivated community` }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/cycles', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const cycles = await prisma.reportCycle.findMany({
+            include: { pathway: true, _count: { select: { weeklyReports: true } } }
+        });
+        res.json(cycles.map(c => ({...c, reportsCount: c._count.weeklyReports})));
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/admin/cycles', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { name, startDate, endDate, status, pathwayId } = req.body;
+        
+        if (status === 'OPEN') {
+            const hasOpen = await prisma.reportCycle.findFirst({
+                where: { status: 'OPEN', pathwayId }
+            });
+            if (hasOpen) return res.status(400).json({ error: 'An OPEN cycle already exists for this scope' });
+        }
+        
+        const cycle = await prisma.reportCycle.create({
+            data: { name, startDate: new Date(startDate), endDate: new Date(endDate), status, pathwayId }
+        });
+        await prisma.auditLog.create({
+            data: { actorId: (req as any).user?.id, actorRole: (req as any).user?.role, action: 'CREATE', entityType: 'ReportCycle', entityId: cycle.id, description: `Created cycle: ${cycle.name}` }
+        });
+        res.json(cycle);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.patch('/admin/cycles/:id', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        
+        if (status === 'OPEN') {
+             const cycle = await prisma.reportCycle.findUnique({ where: { id: String(id) }});
+             const hasOpen = await prisma.reportCycle.findFirst({
+                 where: { status: 'OPEN', pathwayId: cycle?.pathwayId }
+             });
+             if (hasOpen && hasOpen.id !== id) return res.status(400).json({ error: 'An OPEN cycle already exists' });
+        }
+        
+        await prisma.reportCycle.update({
+            where: { id: String(id) },
+            data: { status }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/audit', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const logs = await prisma.auditLog.findMany({
+            orderBy: { createdAt: 'desc' },
+            take: 50
+        });
+        res.json(logs);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/targeted-questions', authMiddleware, async (req: any, res: any) => {
+    try {
+        const where: any = { isActive: true };
+        if (isStudentLevel(req.user.role)) {
+            where.studentId = req.user.id;
+        } else if (req.user.role === 'PROGRAM_MANAGER') {
+            const students = await prisma.user.findMany({
+                where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: req.user.id } },
+                select: { id: true }
+            });
+            where.studentId = { in: students.map((student) => student.id) };
+        } else if (isCoachLevel(req.user.role)) {
+            const students = await prisma.user.findMany({
+                where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: req.user.id } },
+                select: { id: true }
+            });
+            where.studentId = { in: students.map((student) => student.id) };
+        } else if (!isAdminLevel(req.user.role)) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+        
+        const questions = await prisma.targetedQuestion.findMany({
+            where,
+            include: { cycle: true }
+        });
+        res.json(questions);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.post('/targeted-questions', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const question = requiredString(req.body.question, 'question', 1000);
+        const studentId = requiredString(req.body.studentId, 'studentId', 128);
+        const cycleId = req.body.cycleId ? requiredString(req.body.cycleId, 'cycleId', 128) : null;
+        const student = await prisma.user.findUnique({
+            where: { id: studentId },
+            include: { studentProfile: true }
+        });
+        if (!student || !isStudentLevel(student.role) || !student.isActive || student.accountStatus !== 'ACTIVE') {
+            return res.status(400).json({ error: 'Invalid student selected' });
+        }
+        
+        if (req.user.role === 'PROGRAM_MANAGER') {
+            if (student?.studentProfile?.programManagerId !== req.user.id) {
+                return res.status(403).json({ error: 'Unauthorized to target this student' });
+            }
+        }
+        
+        const created = await prisma.targetedQuestion.create({
+            data: { question, studentId, cycleId, creatorId: req.user.id }
+        });
+        res.json(created);
+    } catch(e: any) {
+        res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' });
+    }
+});
+
+router.delete('/targeted-questions', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const { id } = req.query;
+        const q = await prisma.targetedQuestion.findUnique({ where: { id: String(id) } });
+        if (!q) return res.status(404).json({ error: 'Not found' });
+        
+        if (req.user.role === 'PROGRAM_MANAGER' && q.creatorId !== req.user.id) {
+            return res.status(403).json({ error: 'Unauthorized to delete this question' });
+        }
+
+        await prisma.targetedQuestion.update({
+            where: { id: String(id) },
+            data: { isActive: false }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/pm/dashboard', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req, res) => {
+    try {
+        const students = await prisma.user.findMany({
+            where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: (req as any).user?.id } },
+            include: { weeklyReports: { where: { status: { in: ['SUBMITTED', 'REVIEWED'] } } } }
+        });
+        const alerts = await prisma.alert.findMany({
+            where: { resolved: false, student: { studentProfile: { programManagerId: (req as any).user?.id } } },
+            include: { student: true }
+        });
+        const studentsWithReports = students.map(s => omitSensitive({
+            ...s,
+            reports: s.weeklyReports
+        }));
+        res.json({ students: studentsWithReports, alerts: omitSensitive(alerts) });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/student/reports', authMiddleware, roleMiddleware(['STUDENT']), async (req, res) => {
+    try {
+        const reports = await prisma.weeklyReport.findMany({
+            where: { studentId: (req as any).user?.id },
+            include: { cycle: true },
+            orderBy: { submittedAt: 'desc' }
+        });
+        res.json(reports);
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/reports/:id', authMiddleware, async (req: any, res: any) => {
+    try {
+        const report = await prisma.weeklyReport.findUnique({
+            where: { id: req.params.id },
+            include: {
+                student: { include: { studentProfile: { include: { coach: true, programManager: true, pathway: true, classEnrollments: { include: { classModel: true } } } } } },
+                cycle: true,
+                classRatings: { include: { classModel: true } },
+                targetedAnswers: { include: { question: true } },
+                coachFeedback: { include: { coach: true } }
+            }
+        });
+        if (!report) return res.status(404).json({ error: 'Report not found' });
+
+        const reqUser = req.user;
+        let authorized = false;
+        if (isAdminLevel(reqUser.role)) authorized = true;
+        else if (isStudentLevel(reqUser.role) && report.studentId === reqUser.id) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
+        else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
+        else if (reqUser.role === 'INSTRUCTOR') {
+             const enrollments = report.student.studentProfile?.classEnrollments || [];
+             authorized = enrollments.some((ce:any) => ce.classModel?.instructorId === reqUser.id);
+        }
+
+        if (!authorized) return res.status(403).json({ error: 'Unauthorized' });
+
+        res.json(omitSensitive(report));
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.patch('/reports/:id/review', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH', 'PSM']), async (req: any, res: any) => {
+    try {
+        const { id } = req.params;
+        const report = await prisma.weeklyReport.findUnique({
+            where: { id },
+            include: { student: { include: { studentProfile: true } } }
+        });
+        if (!report) return res.status(404).json({ error: 'Report not found' });
+
+        if (report.status !== 'SUBMITTED') {
+            return res.status(400).json({ error: 'Only submitted reports can be marked as reviewed' });
+        }
+
+        const reqUser = req.user;
+        let authorized = false;
+        if (isAdminLevel(reqUser.role)) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
+        else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
+
+        if (!authorized) return res.status(403).json({ error: 'Unauthorized to review this report' });
+
+        await prisma.weeklyReport.update({
+            where: { id },
+            data: { status: 'REVIEWED' }
+        });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/admin/reports', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER']), async (req, res) => {
+    try {
+        const reqUser = (req as any).user;
+        const where = reqUser.role === 'PROGRAM_MANAGER'
+            ? { status: { in: ['SUBMITTED', 'REVIEWED'] }, student: { studentProfile: { programManagerId: reqUser.id } } }
+            : { status: { in: ['SUBMITTED', 'REVIEWED'] } };
+        const reports = await prisma.weeklyReport.findMany({
+            where,
+            include: { student: true, cycle: true },
+            orderBy: { submittedAt: 'desc' }
+        });
+        res.json(omitSensitive(reports));
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/coach/dashboard', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req, res) => {
+    try {
+        const students = await prisma.user.findMany({
+            where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: (req as any).user?.id } },
+            select: { id: true, name: true, email: true, role: true, accountStatus: true, isActive: true, createdAt: true }
+        });
+        const reports = await prisma.weeklyReport.findMany({
+            where: {
+                student: { studentProfile: { coachId: (req as any).user?.id } },
+                status: { in: ['SUBMITTED', 'REVIEWED'] }
+            },
+            include: { student: true }
+        });
+        res.json({ students, reports: omitSensitive(reports) });
+    } catch(e) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// ======== STUDENT ========
+router.get('/student/me', authMiddleware, roleMiddleware(['STUDENT']), async (req: any, res: any) => {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { studentProfile: { include: { programManager: true, coach: true, pathway: true, classEnrollments: { include: { classModel: true } } } } }
+        });
+        const cycleScope = user?.studentProfile?.pathwayId
+            ? [{ pathwayId: user.studentProfile.pathwayId }, { pathwayId: null }]
+            : [{ pathwayId: null }];
+        const openCycle = await prisma.reportCycle.findFirst({
+            where: {
+                status: 'OPEN',
+                OR: cycleScope
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        let currentReport = null;
+        if (openCycle) {
+            currentReport = await prisma.weeklyReport.findFirst({ where: { studentId: req.user.id, cycleId: openCycle.id } });
+        }
+        res.json(omitSensitive({ ...user, currentCycle: openCycle, currentReport }));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/student/classes', authMiddleware, roleMiddleware(['STUDENT']), async (req: any, res: any) => {
+    try {
+        const user = await prisma.user.findUnique({ where: { id: req.user.id }, include: { studentProfile: { include: { classEnrollments: { include: { classModel: { include: { instructor: true } } } } } } } });
+        res.json(omitSensitive(user?.studentProfile?.classEnrollments.map((e: any) => e.classModel) || []));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/student/history', authMiddleware, roleMiddleware(['STUDENT']), async (req: any, res: any) => {
+    try {
+        const reports = await prisma.weeklyReport.findMany({
+            where: { studentId: req.user.id },
+            include: { cycle: true, classRatings: { include: { classModel: true } } },
+            orderBy: { submittedAt: 'desc' }
+        });
+        res.json(reports);
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// ======== COACH ========
+router.get('/coach/students', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req: any, res: any) => {
+    try {
+        const students = await prisma.user.findMany({
+            where: { role: { in: STUDENT_LEVEL }, studentProfile: { coachId: req.user.id } },
+            include: { studentProfile: { include: { pathway: true } } }
+        });
+        res.json(omitSensitive(students));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/coach/reports', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req: any, res: any) => {
+    try {
+        const reports = await prisma.weeklyReport.findMany({
+            where: {
+                student: { studentProfile: { coachId: req.user.id } },
+                status: { in: ['SUBMITTED', 'REVIEWED'] }
+            },
+            include: { student: true, cycle: true, classRatings: true },
+            orderBy: { submittedAt: 'desc' }
+        });
+        res.json(omitSensitive(reports));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/coach/alerts', authMiddleware, roleMiddleware(['COACH', 'PSM']), async (req: any, res: any) => {
+    try {
+        const alerts = await prisma.alert.findMany({
+            where: { resolved: false, student: { studentProfile: { coachId: req.user.id } } },
+            include: { student: true },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json(omitSensitive(alerts));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.patch('/alerts/:id/resolve', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH', 'PSM']), async (req: any, res: any) => {
+    try {
+        const alertInfo = await prisma.alert.findUnique({
+            where: { id: req.params.id },
+            include: { student: { include: { studentProfile: true } } }
+        });
+        if (!alertInfo) return res.status(404).json({ error: 'Alert not found' });
+
+        const reqUser = req.user;
+        let authorized = false;
+        if (isAdminLevel(reqUser.role)) authorized = true;
+        else if (servesStudent(reqUser, alertInfo.student.studentProfile)) authorized = true;
+        else if (reqUser.role === 'PROGRAM_MANAGER' && alertInfo.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
+        
+        if (!authorized) return res.status(403).json({ error: 'Unauthorized to resolve this alert' });
+
+        await prisma.alert.update({ where: { id: req.params.id }, data: { resolved: true } });
+        res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// ======== INSTRUCTOR ========
+router.get('/instructor/dashboard', authMiddleware, roleMiddleware(['INSTRUCTOR']), async (req: any, res: any) => {
+    try {
+        const classes = await prisma.classModel.findMany({ where: { instructorId: req.user.id, isActive: true }, include: { _count: { select: { studentClassEnrollments: true } } } });
+        const ratings = await prisma.classRating.findMany({ where: { classModel: { instructorId: req.user.id } }, include: { classModel: true } });
+        res.json({ classes, ratings });
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/instructor/classes', authMiddleware, roleMiddleware(['INSTRUCTOR']), async (req: any, res: any) => {
+    try {
+        const classes = await prisma.classModel.findMany({ where: { instructorId: req.user.id, isActive: true }, include: { studentClassEnrollments: { include: { studentProfile: { include: { user: true } } } } } });
+        res.json(omitSensitive(classes));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/instructor/reports', authMiddleware, roleMiddleware(['INSTRUCTOR']), async (req: any, res: any) => {
+    try {
+        const myClasses = await prisma.classModel.findMany({ where: { instructorId: req.user.id } });
+        const classIds = myClasses.map(c => c.id);
+        const ratings = await prisma.classRating.findMany({
+            where: { classId: { in: classIds } },
+            include: { report: { include: { student: true, cycle: true } }, classModel: true }
+        });
+        const reports = new Map();
+        for (const r of ratings) {
+            if (!reports.has(r.reportId)) reports.set(r.reportId, r.report);
+        }
+        res.json(omitSensitive(Array.from(reports.values())));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// ======== PM ========
+router.get('/pm/students', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const students = await prisma.user.findMany({ where: { role: { in: STUDENT_LEVEL }, studentProfile: { programManagerId: req.user.id } }, include: { studentProfile: { include: { pathway: true, coach: true } } } });
+        res.json(omitSensitive(students));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const staff = await prisma.user.findMany({
+            where: { role: { in: ['COACH', 'PSM', 'INSTRUCTOR'] }, managerId: req.user.id, isActive: true },
+            select: { id: true, name: true, email: true, role: true, accountStatus: true, isActive: true, createdAt: true }
+        });
+        res.json(staff);
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.post('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const { role } = req.body;
+        const name = requiredString(req.body.name, 'name', 128);
+        const normalizedEmail = requiredString(req.body.email, 'email', 256).toLowerCase();
+        
+        const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (existing) return res.status(400).json({ error: 'User already exists' });
+
+        if (role !== 'COACH' && role !== 'PSM' && role !== 'INSTRUCTOR') {
+            return res.status(400).json({ error: 'Invalid role for PM to invite' });
+        }
+        
+        const invite = newInvite();
+        const user = await prisma.user.create({
+            data: {
+                name,
+                email: normalizedEmail,
+                role,
+                accountStatus: 'INVITED',
+                isActive: true,
+                ...invite,
+                managerId: req.user.id
+            }
+        });
+
+        await prisma.auditLog.create({
+            data: { actorId: req.user.id, actorRole: req.user.role, action: 'CREATE', entityType: 'User', entityId: user.id, description: `PM invited ${role} ${name}` }
+        });
+
+        res.json({
+            success: true,
+            setupLink: `/setup-account?token=${invite.inviteToken}`,
+            setupLinkExpiresAt: invite.inviteExpires.toISOString()
+        });
+    } catch(e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' }); }
+});
+
+router.delete('/pm/staff', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const targetId = req.query.id as string;
+        const target = await prisma.user.findUnique({ where: { id: targetId }, select: { managerId: true, role: true } });
+        if (!target) return res.status(404).json({ error: 'User not found' });
+        if (target.managerId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+        await prisma.user.update({ where: { id: targetId }, data: { isActive: false, accountStatus: 'DEACTIVATED' } });
+        res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/pm/communities', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const communities = await prisma.community.findMany({
+            where: { programManagerId: req.user.id },
+            include: { programManager: { select: { id: true, name: true, email: true } } }
+        });
+        res.json(communities);
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.post('/pm/communities', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        res.json(await prisma.community.create({ data: { name: req.body.name, programManagerId: req.user.id } }));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.delete('/pm/communities', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const id = String(req.query.id || '');
+        const community = await prisma.community.findUnique({ where: { id } });
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+        if (community.programManagerId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+        await prisma.community.update({ where: { id }, data: { isActive: false } });
+        res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/pm/reports', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const reports = await prisma.weeklyReport.findMany({
+            where: {
+                student: { studentProfile: { programManagerId: req.user.id } },
+                status: { in: ['SUBMITTED', 'REVIEWED'] }
+            },
+            include: { student: true, cycle: true, classRatings: true },
+            orderBy: { submittedAt: 'desc' }
+        });
+        res.json(omitSensitive(reports));
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.get('/pm/analytics', authMiddleware, roleMiddleware(['PROGRAM_MANAGER']), async (req: any, res: any) => {
+    try {
+        const pmId = req.user.id;
+        const totalStudents = await prisma.user.count({ where: { role: { in: STUDENT_LEVEL }, isActive: true, studentProfile: { programManagerId: pmId } } });
+        
+        let cycle = await prisma.reportCycle.findFirst({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' } });
+        let submissionRate = 0;
+        let activeAlerts = 0;
+
+        if (cycle) {
+            const submittedCount = await prisma.weeklyReport.count({ 
+                where: { cycleId: cycle.id, student: { studentProfile: { programManagerId: pmId } } } 
+            });
+            if (totalStudents > 0) submissionRate = Math.round((submittedCount / totalStudents) * 100);
+        }
+
+        activeAlerts = await prisma.alert.count({ 
+            where: { resolved: false, student: { studentProfile: { programManagerId: pmId } } } 
+        });
+
+        res.json({ totalStudents, submissionRate, activeAlerts, classPerformance: {}, alertDistribution: [] }); 
+    } catch(e) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.post('/reports/:id/feedback', authMiddleware, roleMiddleware(['ADMIN', 'PROGRAM_MANAGER', 'COACH', 'PSM']), async (req: any, res: any) => {
+    try {
+        const text = requiredString(req.body.text, 'feedback', 4000);
+        const report = await prisma.weeklyReport.findUnique({
+            where: { id: req.params.id },
+            include: { student: { include: { studentProfile: true } } }
+        });
+        if (!report) return res.status(404).json({ error: 'Report not found' });
+
+        const reqUser = req.user;
+        let authorized = false;
+        if (isAdminLevel(reqUser.role)) authorized = true;
+        else if (servesStudent(reqUser, report.student.studentProfile)) authorized = true;
+        else if (reqUser.role === 'PROGRAM_MANAGER' && report.student.studentProfile?.programManagerId === reqUser.id) authorized = true;
+
+        if (!authorized) return res.status(403).json({ error: 'Unauthorized to give feedback on this report' });
+
+        const feedback = await prisma.coachFeedback.create({
+            data: {
+                reportId: req.params.id,
+                coachId: req.user.id,
+                feedback: text
+            }
+        });
+        res.json({ success: true, text, feedback });
+    } catch(e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' }); }
+});
+
+const conductInclude = {
+    student: { select: { id: true, name: true, email: true } },
+    author: { select: { id: true, name: true, role: true } },
+    reviewer: { select: { id: true, name: true } }
+};
+
+router.get('/conduct/students', authMiddleware, roleMiddleware(['ADMIN', 'INSTRUCTOR']), async (req: any, res: any) => {
+    try {
+        const where = isAdminLevel(req.user.role)
+            ? { role: { in: STUDENT_LEVEL }, isActive: true }
+            : {
+                role: { in: STUDENT_LEVEL }, isActive: true,
+                studentProfile: { classEnrollments: { some: { isActive: true, classModel: { instructorId: req.user.id } } } }
+            };
+        const students = await prisma.user.findMany({ where, select: { id: true, name: true, email: true }, orderBy: { name: 'asc' } });
+        res.json(students);
+    } catch (e) { res.status(500).json({ error: 'Unable to load students' }); }
+});
+
+router.get('/conduct', authMiddleware, roleMiddleware(['ADMIN', 'INSTRUCTOR']), async (req: any, res: any) => {
+    try {
+        const where = isAdminLevel(req.user.role)
+            ? {}
+            : { student: { studentProfile: { classEnrollments: { some: { isActive: true, classModel: { instructorId: req.user.id } } } } } };
+        const entries = await prisma.conductEntry.findMany({ where, include: conductInclude, orderBy: { createdAt: 'desc' }, take: 250 });
+        res.json(entries);
+    } catch (e) { res.status(500).json({ error: 'Unable to load conduct entries' }); }
+});
+
+router.post('/conduct', authMiddleware, roleMiddleware(['ADMIN', 'INSTRUCTOR']), async (req: any, res: any) => {
+    try {
+        const type = req.body.type;
+        if (!['INFRACTION', 'CONVERSATION'].includes(type)) throw httpError(400, 'type must be INFRACTION or CONVERSATION');
+        const studentId = requiredString(req.body.studentId, 'student', 128);
+        const summary = requiredString(req.body.summary, 'summary', 2000);
+        const followUp = requiredString(req.body.followUp, 'action or follow-up', 2000);
+        const points = type === 'CONVERSATION' ? 0 : optionalInt(req.body.points, 'points', 1, 100, 0);
+        if (type === 'INFRACTION' && points === 0) throw httpError(400, 'Infraction points must be between 1 and 100');
+
+        const student = await prisma.user.findFirst({ where: { id: studentId, role: { in: STUDENT_LEVEL }, isActive: true }, include: { studentProfile: { include: { classEnrollments: { include: { classModel: true } } } } } });
+        if (!student) throw httpError(404, 'Student not found');
+        if (req.user.role === 'INSTRUCTOR' && !student.studentProfile?.classEnrollments.some((item) => item.isActive && item.classModel.instructorId === req.user.id)) {
+            throw httpError(403, 'You can only log entries for students in your classes');
+        }
+
+        const approved = isAdminLevel(req.user.role) || type === 'CONVERSATION';
+        const entry = await prisma.$transaction(async (tx) => {
+            const created = await tx.conductEntry.create({ data: {
+                studentId, authorId: req.user.id, type, points, summary, followUp,
+                status: approved ? 'APPROVED' : 'PENDING',
+                reviewerId: isAdminLevel(req.user.role) ? req.user.id : null,
+                reviewedAt: isAdminLevel(req.user.role) ? new Date() : null
+            }, include: conductInclude });
+            await tx.auditLog.create({ data: { actorId: req.user.id, actorRole: req.user.role, action: 'CREATE', entityType: 'ConductEntry', entityId: created.id, description: `${type === 'INFRACTION' ? `${points}-point infraction` : 'Conversation note'} logged for ${student.name}` } });
+            return created;
+        });
+        res.status(201).json(entry);
+    } catch (e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Unable to create conduct entry' }); }
+});
+
+router.patch('/conduct/:id', authMiddleware, roleMiddleware(['ADMIN']), async (req: any, res: any) => {
+    try {
+        const status = req.body.status;
+        if (!['APPROVED', 'CLEARED'].includes(status)) throw httpError(400, 'status must be APPROVED or CLEARED');
+        const existing = await prisma.conductEntry.findUnique({ where: { id: req.params.id }, include: { student: true } });
+        if (!existing) throw httpError(404, 'Entry not found');
+        const points = existing.type === 'CONVERSATION' ? 0 : optionalInt(req.body.points, 'points', 1, 100, existing.points);
+        const entry = await prisma.$transaction(async (tx) => {
+            const updated = await tx.conductEntry.update({ where: { id: existing.id }, data: { status, points, reviewerId: req.user.id, reviewedAt: new Date() }, include: conductInclude });
+            await tx.auditLog.create({ data: { actorId: req.user.id, actorRole: req.user.role, action: status, entityType: 'ConductEntry', entityId: existing.id, description: `${status === 'CLEARED' ? 'Cleared' : 'Approved'} conduct entry for ${existing.student.name}${status === 'APPROVED' ? ` at ${points} points` : ''}` } });
+            return updated;
+        });
+        res.json(entry);
+    } catch (e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Unable to review conduct entry' }); }
 // Dashboard redirect
 router.get('/dashboard-redirect', authMiddleware, (req, res) => {
   const role = (req as any).user.role;
@@ -64,5 +1517,21 @@ router.get('/dashboard-redirect', authMiddleware, (req, res) => {
     default: return res.redirect('/');
   }
 });
+
+// Member profiles (LinkedIn-style work experience, education, skills, resume).
+import profileRoutes from './profileRoutes.js';
+router.use(profileRoutes);
+
+// PSM caseload and the Phase 2 timesheet flow.
+import psmRoutes from './psmRoutes.js';
+router.use(psmRoutes);
+
+// Performance contract standing, point balances, and EPIC plans.
+import contractRoutes from './contractRoutes.js';
+router.use(contractRoutes);
+
+// Cohort administration and PSM placement assignment.
+import cohortRoutes from './cohortRoutes.js';
+router.use(cohortRoutes);
 
 export default router;

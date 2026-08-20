@@ -11,6 +11,16 @@ export const ROLES = {
   STUDENT: 'STUDENT',
   INTERN: 'INTERN',
   INSTRUCTOR: 'INSTRUCTOR',
+
+  // Placement-side and site staff. These carry NO permissions of their own —
+  // they are deliberately absent from every permission group below, so an
+  // account with one of these roles can reach its own profile and the member
+  // directory and nothing else. Grant them access explicitly when needed.
+  CORPORATE_ENGAGEMENT_MANAGER: 'CORPORATE_ENGAGEMENT_MANAGER',
+  INTERNSHIP_SERVICES_SPECIALIST: 'INTERNSHIP_SERVICES_SPECIALIST',
+  SITE_OPERATIONS: 'SITE_OPERATIONS',
+  STUDENT_SERVICES: 'STUDENT_SERVICES',
+  DEVELOPMENT_FINANCE: 'DEVELOPMENT_FINANCE',
 } as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -18,7 +28,15 @@ export type UserRole = (typeof ROLES)[keyof typeof ROLES];
 export const ALL_ROLES: UserRole[] = Object.values(ROLES);
 
 // ── Permission groups ───────────────────────────────────────────────────────
-// DEV mirrors ADMIN, PSM mirrors COACH, INTERN mirrors STUDENT.
+// DEV mirrors ADMIN, INTERN mirrors STUDENT.
+//
+// A Placement Success Manager sits under Corporate Engagement and owns the
+// employer relationship through Phase 2 — but the same person can also coach a
+// caseload. Because `User.role` holds a single value, staff access to a given
+// student follows the ASSIGNMENT (StudentProfile.coachId / .psmId /
+// .programManagerId), never the role label. See servesStudent in
+// server/phaseRouting.ts. COACH_LEVEL below answers a different question — who
+// may be assigned as a student's coach — and PSMs qualify.
 export const ADMIN_LEVEL: UserRole[] = ['ADMIN', 'DEV'];
 export const COACH_LEVEL: UserRole[] = ['COACH', 'PSM'];
 export const STUDENT_LEVEL: UserRole[] = ['STUDENT', 'INTERN'];
@@ -27,8 +45,12 @@ export const STAFF_MANAGE: UserRole[] = ['ADMIN', 'DEV', 'PROGRAM_MANAGER'];
 export function isAdminLevel(role?: string | null): boolean {
   return role === 'ADMIN' || role === 'DEV';
 }
+/** Eligible to be assigned as a student's coach. Not a permission check. */
 export function isCoachLevel(role?: string | null): boolean {
   return role === 'COACH' || role === 'PSM';
+}
+export function isPsm(role?: string | null): boolean {
+  return role === 'PSM';
 }
 export function isStudentLevel(role?: string | null): boolean {
   return role === 'STUDENT' || role === 'INTERN';
@@ -42,8 +64,11 @@ export function isStudentLevel(role?: string | null): boolean {
 export function expandRoles(roles: string[]): string[] {
   const set = new Set(roles);
   if (set.has('ADMIN')) set.add('DEV');
-  if (set.has('COACH')) set.add('PSM');
   if (set.has('STUDENT')) set.add('INTERN');
+  // COACH no longer implies PSM. The coach and PSM surfaces list both roles
+  // explicitly and scope their data by assignment, so someone who wears both
+  // hats sees their coached students in one and their placed students in the
+  // other — and nobody sees a caseload they were not assigned.
   return [...set];
 }
 
@@ -51,9 +76,55 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   DEV: 'Dev',
   ADMIN: 'Admin',
   PROGRAM_MANAGER: 'Program Manager',
-  COACH: 'Coach',
-  PSM: 'PSM',
+  COACH: 'Professional Skills Coach',
+  PSM: 'Placement Success Manager',
   STUDENT: 'Student',
   INTERN: 'Intern',
   INSTRUCTOR: 'Instructor',
+  CORPORATE_ENGAGEMENT_MANAGER: 'Corporate Engagement Manager',
+  INTERNSHIP_SERVICES_SPECIALIST: 'Internship Services Specialist',
+  SITE_OPERATIONS: 'Site Operations & Admin',
+  STUDENT_SERVICES: 'Student Services',
+  DEVELOPMENT_FINANCE: 'Grants, Development & Finance',
 };
+
+/**
+ * How staff roles group into the four operating functions of a site. Used to
+ * organise the member directory; it carries no authority of its own.
+ *
+ * PSM sits under placement because that is the job: the Corporate Engagement
+ * umbrella, owning the employer relationship through Phase 2.
+ */
+export const STAFF_FUNCTIONS: { key: string; label: string; description: string; roles: UserRole[] }[] = [
+  {
+    key: 'PLACEMENT',
+    label: 'Corporate Engagement & Placement',
+    description: 'Employer partnerships, internship matching, and post-graduation placement',
+    roles: ['CORPORATE_ENGAGEMENT_MANAGER', 'PSM', 'INTERNSHIP_SERVICES_SPECIALIST'],
+  },
+  {
+    key: 'PROGRAM',
+    label: 'Learning Community & Program Leadership',
+    description: 'Program managers and the coaches mentoring students in this learning community',
+    roles: ['PROGRAM_MANAGER', 'COACH'],
+  },
+  {
+    key: 'ACADEMIC',
+    label: 'Academic & Instructional Staff',
+    description: 'Track and business communications instructors',
+    roles: ['INSTRUCTOR'],
+  },
+  {
+    key: 'OPERATIONS',
+    label: 'Operations & Organizational Support',
+    description: 'Site operations, student services, and development & finance',
+    roles: ['SITE_OPERATIONS', 'STUDENT_SERVICES', 'DEVELOPMENT_FINANCE'],
+  },
+];
+
+/** Every role that belongs to a staff function (i.e. everyone in the directory's staff groups). */
+export const STAFF_FUNCTION_ROLES: UserRole[] = STAFF_FUNCTIONS.flatMap((fn) => fn.roles);
+
+export function staffFunctionForRole(role?: string | null): string | null {
+  return STAFF_FUNCTIONS.find((fn) => fn.roles.includes(role as UserRole))?.key ?? null;
+}

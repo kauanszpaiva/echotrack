@@ -4,7 +4,8 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   LayoutDashboard, Building2, UserCog, Layers, BookOpen, ArrowLeft,
   Users, Calendar, FileText, Target, BarChart3, ClipboardList, Settings, LogOut,
-  ShieldAlert, Award, Zap, Menu, X
+  ShieldAlert, Award, Zap, Menu, X, GraduationCap,
+  UserRound, Contact, Briefcase, Clock
 } from 'lucide-react';
 import { Logo } from '../../components/Logo';
 import { ROLE_BADGE } from '../../types';
@@ -55,6 +56,7 @@ export function DashboardLayout() {
       { label: 'Pathways',         href: '/admin/pathways',           icon: Layers },
       { label: 'Classes',          href: '/admin/classes',            icon: BookOpen },
       { label: 'Communities',      href: '/admin/communities',        icon: Users },
+      { label: 'Cohorts',          href: '/admin/cohorts',            icon: GraduationCap },
       { label: 'Report Cycles',    href: '/admin/cycles',             icon: Calendar },
       { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
       { label: 'Conduct Points',   href: '/admin/conduct',            icon: ShieldAlert },
@@ -67,6 +69,7 @@ export function DashboardLayout() {
     const pmItems = [
       { label: 'Dashboard',        href: '/pm',                       icon: LayoutDashboard },
       { label: 'Users',            href: '/admin/users',              icon: UserCog },
+      { label: 'Cohorts',          href: '/admin/cohorts',            icon: GraduationCap },
       { label: 'All Reports',      href: '/admin/reports',            icon: FileText },
       { label: 'Questions',        href: '/admin/targeted-questions', icon: Target },
       { label: 'Analytics',        href: '/admin/analytics',          icon: BarChart3 }
@@ -75,32 +78,47 @@ export function DashboardLayout() {
       { label: 'Dashboard',      href: '/instructor',          icon: LayoutDashboard },
       { label: 'Conduct Points', href: '/instructor/conduct',  icon: ShieldAlert }
     ];
+    // Coaching and placement are separate views of separate caseloads. Both are
+    // offered to either role, since one person can coach and also be a PSM.
     const coachItems = [
-      { label: 'Dashboard',    href: '/coach',          icon: LayoutDashboard }
+      { label: 'Coaching',       href: '/coach',           icon: LayoutDashboard },
+      { label: 'Placement',      href: '/psm',             icon: Briefcase }
     ];
     const studentItems = [
-      { label: 'Dashboard',      href: '/student',         icon: LayoutDashboard },
-      { label: 'Weekly Report',  href: '/student/report',  icon: FileText }
+      { label: 'Dashboard',      href: '/student',           icon: LayoutDashboard },
+      { label: 'Weekly Report',  href: '/student/report',    icon: FileText },
+      { label: 'Timesheet',      href: '/student/timesheet', icon: Clock },
+      { label: 'My Standing',    href: '/student/standing',  icon: Award }
     ];
 
-    switch (user.role) {
-      case 'DEV':
-        // DEV = full admin access + a dedicated developer area.
-        return [{ label: 'Dev Panel', href: '/dev', icon: Zap }, ...adminItems];
-      case 'ADMIN':
-        return adminItems;
-      case 'PROGRAM_MANAGER':
-        return pmItems;
-      case 'INSTRUCTOR':
-        return instructorItems;
-      case 'COACH':
-      case 'PSM':
-        return coachItems;
-      case 'STUDENT':
-      case 'INTERN':
-        return studentItems;
-      default: return [];
-    }
+    // Every member has a profile and can browse their cohort directory.
+    const profileItems = [
+      { label: 'My Profile',       href: '/profile',    icon: UserRound },
+      { label: 'Member Directory', href: '/directory',  icon: Contact },
+    ];
+
+    const roleItems = (() => {
+      switch (user.role) {
+        case 'DEV':
+          // DEV = full admin access + a dedicated developer area.
+          return [{ label: 'Dev Panel', href: '/dev', icon: Zap }, ...adminItems];
+        case 'ADMIN':
+          return adminItems;
+        case 'PROGRAM_MANAGER':
+          return pmItems;
+        case 'INSTRUCTOR':
+          return instructorItems;
+        case 'COACH':
+        case 'PSM':
+          return coachItems;
+        case 'STUDENT':
+        case 'INTERN':
+          return studentItems;
+        default: return [];
+      }
+    })();
+
+    return [...roleItems, ...profileItems];
   };
 
   const navItems = getSidebarItems();

@@ -16,6 +16,10 @@ export const AREA_ROLES = {
   adminShared: STAFF_MANAGE,
   pm: ['PROGRAM_MANAGER'],
   coach: COACH_LEVEL,
+  /** Placement. Coaching and placement are separate views of separate
+      caseloads; one person can hold both jobs, so either role may open either
+      area and each is scoped by assignment server-side. */
+  psm: COACH_LEVEL,
   instructor: ['INSTRUCTOR'],
   student: STUDENT_LEVEL,
   /** Conduct log: admins plus the instructors who teach the student. */
@@ -38,11 +42,22 @@ export function homePathForRole(role: string | undefined | null): string {
     case 'INSTRUCTOR':
       return '/instructor';
     case 'COACH':
-    case 'PSM':
       return '/coach';
+    case 'PSM':
+      return '/psm';
     case 'STUDENT':
     case 'INTERN':
       return '/student';
+    // Placement and site staff have no dashboard of their own yet. Their profile
+    // is the one page they can always reach; sending them to /login would bounce
+    // an authenticated user in a loop.
+    case 'CORPORATE_ENGAGEMENT_MANAGER':
+    case 'INTERNSHIP_SERVICES_SPECIALIST':
+    case 'SITE_OPERATIONS':
+    case 'STUDENT_SERVICES':
+    case 'DEVELOPMENT_FINANCE':
+      return '/profile';
+    // No role at all — not signed in, or an unrecognised value.
     default:
       return '/login';
   }

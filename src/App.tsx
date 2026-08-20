@@ -16,6 +16,7 @@ import { AllUsers } from './views/Admin/AllUsers';
 import { Pathways } from './views/Admin/Pathways';
 import { Classes } from './views/Admin/Classes';
 import { Communities } from './views/Admin/Communities';
+import { Cohorts } from './views/Admin/Cohorts';
 import { ReportCycles } from './views/Admin/ReportCycles';
 import { AllReports } from './views/Admin/AllReports';
 import { TargetedQuestions } from './views/Admin/TargetedQuestions';
@@ -36,6 +37,11 @@ import { InstructorDashboard } from './views/Instructor/InstructorDashboard';
 import { InstructorClasses } from './views/Instructor/InstructorClasses';
 import { ReportDetail } from './views/Admin/ReportDetail';
 import { ConductTracker } from './views/Conduct/ConductTracker';
+import { MemberProfile } from './views/Profile/MemberProfile';
+import { PSMDashboard } from './views/PSM/PSMDashboard';
+import { StudentTimesheet } from './views/Student/StudentTimesheet';
+import { StudentStanding } from './views/Student/StudentStanding';
+import { MemberDirectory } from './views/Profile/MemberDirectory';
 
 function DashboardRedirect() {
   const { user, loading } = useAuth();
@@ -73,6 +79,11 @@ export default function App() {
             <Route path="/dashboard-redirect" element={<DashboardRedirect />} />
 
             <Route element={<DashboardLayout />}>
+              {/* Member profiles and the directory — every signed-in role. */}
+              <Route path="/profile" element={<MemberProfile />} />
+              <Route path="/profile/:userId" element={<MemberProfile />} />
+              <Route path="/directory" element={<MemberDirectory />} />
+
               <Route element={<RequireRole roles={AREA_ROLES.dev} />}>
                 <Route path="/dev" element={<DevPanel />} />
               </Route>
@@ -91,6 +102,7 @@ export default function App() {
 
               <Route element={<RequireRole roles={AREA_ROLES.adminShared} />}>
                 <Route path="/admin/users" element={<AllUsers />} />
+                <Route path="/admin/cohorts" element={<Cohorts />} />
                 <Route path="/admin/reports" element={<AllReports />} />
                 <Route path="/admin/targeted-questions" element={<TargetedQuestions />} />
                 <Route path="/admin/analytics" element={<Analytics />} />
@@ -114,6 +126,10 @@ export default function App() {
                 <Route path="/coach/reports/:id" element={<ReportDetail />} />
               </Route>
 
+              <Route element={<RequireRole roles={AREA_ROLES.psm} />}>
+                <Route path="/psm" element={<PSMDashboard />} />
+              </Route>
+
               <Route element={<RequireRole roles={AREA_ROLES.instructor} />}>
                 <Route path="/instructor" element={<InstructorDashboard />} />
                 <Route path="/instructor/classes" element={<InstructorClasses />} />
@@ -124,6 +140,8 @@ export default function App() {
               <Route element={<RequireRole roles={AREA_ROLES.student} />}>
                 <Route path="/student" element={<StudentDashboard />} />
                 <Route path="/student/report" element={<StudentReportWizard />} />
+                <Route path="/student/timesheet" element={<StudentTimesheet />} />
+                <Route path="/student/standing" element={<StudentStanding />} />
                 <Route path="/student/history" element={<StudentHistory />} />
                 <Route path="/student/reports/:id" element={<ReportDetail />} />
               </Route>

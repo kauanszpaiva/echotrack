@@ -77,7 +77,12 @@ export function AllUsers() {
     }
   };
 
-  const roles = ['ALL', 'DEV', 'PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR', 'STUDENT', 'INTERN'];
+  const roles = [
+    'ALL', 'DEV', 'PROGRAM_MANAGER', 'COACH', 'PSM', 'INSTRUCTOR',
+    'CORPORATE_ENGAGEMENT_MANAGER', 'INTERNSHIP_SERVICES_SPECIALIST',
+    'SITE_OPERATIONS', 'STUDENT_SERVICES', 'DEVELOPMENT_FINANCE',
+    'STUDENT', 'INTERN',
+  ];
 
   const filtered = users.filter(u => 
     (filter === 'ALL' || u.role === filter) &&
@@ -111,9 +116,14 @@ export function AllUsers() {
                      >
                        {user?.role === 'DEV' && <option value="DEV">Dev</option>}
                        {isAdminLevel(user?.role) && <option value="PROGRAM_MANAGER">Program Manager</option>}
-                       <option value="COACH">Coach</option>
-                       <option value="PSM">PSM</option>
+                       <option value="COACH">Professional Skills Coach</option>
+                       <option value="PSM">Placement Success Manager</option>
                        <option value="INSTRUCTOR">Instructor</option>
+                       {isAdminLevel(user?.role) && <option value="CORPORATE_ENGAGEMENT_MANAGER">Corporate Engagement Manager</option>}
+                       {isAdminLevel(user?.role) && <option value="INTERNSHIP_SERVICES_SPECIALIST">Internship Services Specialist</option>}
+                       {isAdminLevel(user?.role) && <option value="SITE_OPERATIONS">Site Operations &amp; Admin</option>}
+                       {isAdminLevel(user?.role) && <option value="STUDENT_SERVICES">Student Services</option>}
+                       {isAdminLevel(user?.role) && <option value="DEVELOPMENT_FINANCE">Grants, Development &amp; Finance</option>}
                        {isAdminLevel(user?.role) && <option value="INTERN">Intern</option>}
                      </select>
                      <ChevronDown className="w-4 h-4 text-[#9CA3AF] absolute right-4 top-3 pointer-events-none" />
