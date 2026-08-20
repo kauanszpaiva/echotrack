@@ -1,10 +1,11 @@
 // Resend adapter — the only file in the codebase that knows Resend exists.
 //
 // Uses Resend's REST endpoint over `fetch` rather than the SDK: one less
-// dependency in the serverless bundle, and it keeps the timeout under our
-// control. Credentials are read from the environment at call time; none are
+// dependency in the serverless bundle, and it keeps timeout + retry semantics
+// explicit. Credentials are read from the environment at call time; none are
 // baked into the source.
 
+import { createHash } from 'crypto';
 import type { EmailEvent, EmailProvider, EmailSendOutcome } from './types.js';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
@@ -38,6 +39,37 @@ export function renderHtml(event: EmailEvent): string {
   );
 }
 
+/**
+ * Provider-level key derived from the application's stable logical-delivery key.
+ * Hashing keeps it deterministic while staying comfortably below Resend's
+ * 256-character maximum even if a future event key contains long identifiers.
+ */
+export function resendIdempotencyKey(event: EmailEvent): string {
+  const digest = createHash('sha256').update(event.dedupeKey).digest('hex');
+  return `echotrack/${digest}`;
+}
+
+function resendErrorCode(detail: string): string | null {
+  try {
+    const parsed = JSON.parse(detail) as any;
+    return (
+      (typeof parsed?.name === 'string' && parsed.name) ||
+      (typeof parsed?.code === 'string' && parsed.code) ||
+      (typeof parsed?.error?.name === 'string' && parsed.error.name) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function retryableResponse(status: number, code: string | null): boolean {
+  if (status === 429 || status >= 500) return true;
+  // Resend explicitly documents this 409 as safe to retry later with the same
+  // idempotency key. `invalid_idempotent_request` is deliberately NOT retryable.
+  return status === 409 && code === 'concurrent_idempotent_requests';
+}
+
 export class ResendEmailProvider implements EmailProvider {
   readonly name = 'resend';
 
@@ -46,9 +78,15 @@ export class ResendEmailProvider implements EmailProvider {
     const from = process.env.EMAIL_FROM;
 
     // A deployment without mail configured must degrade to a no-op, not an
-    // error: email is never the reason a valid submission fails.
+    // error: email is never the reason a valid submission fails. Because no
+    // provider request occurred, this row is safe to retry later after config.
     if (!apiKey || !from) {
-      return { status: 'SKIPPED', reason: 'RESEND_API_KEY or EMAIL_FROM is not configured' };
+      return {
+        status: 'SKIPPED',
+        reason: 'mail provider is not configured',
+        retryable: true,
+        providerAttempted: false,
+      };
     }
 
     const controller = new AbortController();
@@ -60,6 +98,7 @@ export class ResendEmailProvider implements EmailProvider {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
+          'Idempotency-Key': resendIdempotencyKey(event),
         },
         body: JSON.stringify({
           from,
@@ -73,17 +112,31 @@ export class ResendEmailProvider implements EmailProvider {
       });
 
       if (!response.ok) {
-        // Read the provider's message for the ledger, but never surface it to a
-        // client — it can echo the recipient address back.
+        // Parse only the provider's machine error code. Do not persist the raw
+        // response body because provider errors may echo recipient PII.
         const detail = await response.text().catch(() => '');
-        return { status: 'FAILED', error: `Resend responded ${response.status}: ${detail.slice(0, 300)}` };
+        const code = resendErrorCode(detail);
+        return {
+          status: 'FAILED',
+          error: code ? `Resend responded ${response.status} (${code})` : `Resend responded ${response.status}`,
+          retryable: retryableResponse(response.status, code),
+          providerAttempted: true,
+        };
       }
 
       const payload = (await response.json().catch(() => null)) as { id?: string } | null;
       return { status: 'SENT', providerMessageId: payload?.id ?? null };
     } catch (err: any) {
-      const reason = err?.name === 'AbortError' ? `timed out after ${DEFAULT_TIMEOUT_MS}ms` : String(err?.message ?? err);
-      return { status: 'FAILED', error: reason };
+      const reason =
+        err?.name === 'AbortError'
+          ? `Resend request timed out after ${DEFAULT_TIMEOUT_MS}ms`
+          : 'Resend request failed before a definitive response';
+      return {
+        status: 'FAILED',
+        error: reason,
+        retryable: true,
+        providerAttempted: true,
+      };
     } finally {
       clearTimeout(timeout);
     }
